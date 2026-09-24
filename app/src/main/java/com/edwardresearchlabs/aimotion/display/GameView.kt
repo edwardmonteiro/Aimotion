@@ -2,6 +2,7 @@ package com.edwardresearchlabs.aimotion.display
 
 import android.content.Context
 import android.graphics.BlurMaskFilter
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Paint
@@ -21,6 +22,7 @@ import com.edwardresearchlabs.aimotion.game.NinjaTargetType
 import com.edwardresearchlabs.aimotion.motion.BodyPose
 import com.edwardresearchlabs.aimotion.motion.Joint
 import com.edwardresearchlabs.aimotion.motion.MotionRuntime
+import com.edwardresearchlabs.aimotion.vision.SegmentedPersonFrame
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
@@ -70,6 +72,8 @@ class GameView(context: Context) : View(context) {
     private var shakeStrengthPx = 0f
     private var slowUntilNs = 0L
     private var debugPhysics = false
+    private var realMeEnabled = false
+    private var personFrame: SegmentedPersonFrame? = null
 
     init {
         setLayerType(LAYER_TYPE_SOFTWARE, null)
@@ -82,6 +86,30 @@ class GameView(context: Context) : View(context) {
         return debugPhysics
     }
 
+    fun setRealMeEnabled(enabled: Boolean) {
+        realMeEnabled = enabled
+        if (!enabled) clearPersonFrame()
+        invalidate()
+    }
+
+    fun submitPersonFrame(frame: SegmentedPersonFrame) {
+        val old = personFrame
+        personFrame = frame
+        if (old != null && old.bitmap !== frame.bitmap && !old.bitmap.isRecycled) {
+            old.bitmap.recycle()
+        }
+        invalidate()
+    }
+
+    fun clearPersonFrame() {
+        val old = personFrame
+        personFrame = null
+        if (old != null && !old.bitmap.isRecycled) {
+            old.bitmap.recycle()
+        }
+        invalidate()
+    }
+
     fun resetGame() {
         game.reset()
         particles.clear()
@@ -92,6 +120,7 @@ class GameView(context: Context) : View(context) {
     }
 
     override fun onDetachedFromWindow() {
+        clearPersonFrame()
         runCatching { tone?.release() }
         super.onDetachedFromWindow()
     }
@@ -119,10 +148,16 @@ class GameView(context: Context) : View(context) {
 
         drawBackground(canvas, w, h)
         drawArena(canvas, w, h)
+
+        val personVisible = realMeEnabled && drawRealMe(canvas, w, h)
         drawTargets(canvas, w, h)
 
         if (pose != null) {
-            drawBody(canvas, pose, w, h)
+            if (personVisible) {
+                drawRealMeActionGlow(canvas, pose, w, h)
+            } else {
+                drawBody(canvas, pose, w, h)
+            }
             if (debugPhysics) drawPhysics(canvas, pose, w, h)
         }
 
@@ -321,6 +356,61 @@ class GameView(context: Context) : View(context) {
         paint.color = 0xFF380A14.toInt()
         canvas.drawCircle(cx, cy, r * 0.32f, paint)
         canvas.restore()
+    }
+
+    private fun drawRealMe(canvas: Canvas, w: Float, h: Float): Boolean {
+        val frame = personFrame ?: return false
+        val ageMs = System.currentTimeMillis() - frame.timestampMs
+        if (ageMs > 900L || frame.bitmap.isRecycled) return false
+
+        val bitmap = frame.bitmap
+        val offsetX = MotionRuntime.anchorOffsetX() * w
+
+        fun drawPass(alpha: Int, blur: Float) {
+            canvas.save()
+            canvas.translate(offsetX + if (MotionRuntime.frontCamera) w else 0f, 0f)
+            if (MotionRuntime.frontCamera) canvas.scale(-1f, 1f)
+
+            paint.style = Paint.Style.FILL
+            paint.alpha = alpha
+            paint.maskFilter = if (blur > 0f) BlurMaskFilter(blur, BlurMaskFilter.Blur.NORMAL) else null
+            canvas.drawBitmap(bitmap, null, RectF(0f, 0f, w, h), paint)
+
+            paint.maskFilter = null
+            paint.alpha = 255
+            canvas.restore()
+        }
+
+        drawPass(70, h * 0.016f)
+        drawPass(245, 0f)
+        return true
+    }
+
+    private fun drawRealMeActionGlow(canvas: Canvas, pose: BodyPose, w: Float, h: Float) {
+        drawTrail(canvas, pose, w, h, Joint.LEFT_WRIST, true)
+        drawTrail(canvas, pose, w, h, Joint.RIGHT_WRIST, false)
+
+        for (joint in listOf(
+            Joint.LEFT_WRIST,
+            Joint.RIGHT_WRIST,
+            Joint.LEFT_ANKLE,
+            Joint.RIGHT_ANKLE
+        )) {
+            val p = pose[joint] ?: continue
+            if (p.confidence < 0.45f) continue
+
+            val cx = MotionRuntime.mapX(p.x) * w
+            val cy = p.y * h
+
+            paint.style = Paint.Style.FILL
+            paint.maskFilter = BlurMaskFilter(h * 0.022f, BlurMaskFilter.Blur.NORMAL)
+            paint.color = 0xAA67E8F9.toInt()
+            canvas.drawCircle(cx, cy, h * 0.032f, paint)
+            paint.maskFilter = null
+
+            paint.color = 0xCCFFFFFF.toInt()
+            canvas.drawCircle(cx, cy, h * 0.009f, paint)
+        }
     }
 
     private fun drawBody(canvas: Canvas, pose: BodyPose, w: Float, h: Float) {

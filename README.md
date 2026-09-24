@@ -1,18 +1,33 @@
 # AI Motion
 
-## V0.5.2 — Body viewport fix
+## V0.6 — REAL ME
 
-This hotfix corrects body placement in Body Ninja.
+REAL ME puts the player's actual segmented camera image inside Body Ninja while keeping pose tracking as the physics controller.
 
-### Root cause
-The game view still applied a fixed horizontal mirror transform even when the rear camera was active. Rendering and collision coordinates could therefore disagree with the actual camera orientation.
+### Pipeline
 
-### Fix
-- front camera mirrors X
-- rear camera preserves X
-- first reliable torso center becomes a viewport anchor
-- avatar starts centered without eliminating later lateral movement
-- rendering and collision physics use the same coordinate mapper
-- wrist trails reset when a new game starts
+CameraX
+→ ML Kit Pose (every analyzed frame)
+→ Pose smoothing + prediction
+→ Body physics
+→ ML Kit Selfie Segmentation (throttled)
+→ transparent player cutout
+→ arena compositing
 
-V0.5.1 hit-crash safeguards remain in place.
+### REAL ME
+
+- local-only person segmentation
+- actual camera pixels, not a generated avatar
+- transparent background
+- player cutout follows the same viewport mapping as collision physics
+- hand and foot energy glow
+- existing trails, hit particles, sound, haptics and perfect-hit feedback
+
+### Performance choices
+
+Selfie segmentation is bundled on-device. To protect gameplay responsiveness:
+- segmentation runs every second analyzed frame
+- segmentation input is capped at a 480 px long edge
+- pose tracking continues independently
+
+The game remains functional while the segmentation frame is warming up; it falls back to the skeleton controller if a fresh cutout is unavailable.
