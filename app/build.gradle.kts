@@ -10,8 +10,8 @@ android {
         applicationId = "com.edwardresearchlabs.aimotion"
         minSdk = 29
         targetSdk = 37
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.3.1"
     }
 
     compileOptions {

@@ -2,51 +2,29 @@
 
 **Your body is the controller.**
 
-AI Motion is a local-first Android experiment that turns the phone camera into a body-controlled game system.
+## V0.3.1 — Play tracking hotfix
 
-## V0.3 — Fast Test Modes
+This patch fixes a Play-mode tracking freeze seen after switching from the front-camera test modes.
 
-This release is focused on validating the experience without requiring a TV.
+### Changes
 
-### Mirror Test
-- front camera by default
-- live mirrored preview
-- 33-point skeleton overlay
-- FPS, inference latency and calibration status
+- Mirror mode binds Preview + ImageAnalysis.
+- Avatar and Play bind ImageAnalysis only.
+- Camera sessions are fully unbound before switching lenses or modes.
+- Old pose analyzers finish safely before closing.
+- Late callbacks from an old camera session are ignored.
+- Tracking state is cleared on each mode/lens transition.
+- Game and avatar reject stale poses instead of freezing the previous body position.
+- Diagnostic panel now shows pose age and active pipeline.
 
-### Avatar Test
-- camera hidden
-- tracked body drives a stylized 2.5D robot
-- ML Kit Z landmarks influence limb scale and depth
-- works with front or rear camera
+CameraX supports individual use cases independently, so Play does not need a preview surface.
 
-### Play Mode
-- rear camera automatically selected
-- Goalkeeper fills the phone screen
-- tracked body controls the in-game body envelope
+### Test
 
-### Camera switching
-A dedicated button switches FRONT / REAR at runtime.
-
-## Runtime
-
-CameraX -> ML Kit Pose -> 33 landmarks -> MotionEngine -> Mirror / Avatar / Game
-
-Everything in the tracking path runs locally on the Android device.
-
-## Test order
-
-1. Open Mirror.
-2. Confirm 25-33 tracked points.
-3. Move arms, crouch and lean.
-4. Open Avatar.
-5. Confirm the robot follows shoulders, elbows, wrists, hips, knees and ankles.
-6. Switch FRONT / REAR and compare stability.
-7. Open Play and test Goalkeeper on the phone.
-
-## Next target
-
-- temporal landmark smoothing
-- stronger body collision geometry
-- body segmentation / camera cutout
-- Body Ninja gameplay
+1. Start in MIRROR.
+2. Confirm live skeleton.
+3. Tap AVATAR and move continuously.
+4. Tap PLAY.
+5. Keep moving arms and torso.
+6. Pose age should remain under roughly 450 ms while tracking.
+7. If tracking is lost, the game should display TRACKING LOST instead of freezing an old avatar.

@@ -26,7 +26,7 @@ class GameView(context: Context) : View(context) {
         val dt = ((now - lastFrame) / 1_000_000_000f).coerceAtMost(0.05f)
         lastFrame = now
 
-        val pose = MotionRuntime.pose
+        val pose = MotionRuntime.freshPose(450L)
         game.updatePose(pose)
         game.tick(dt)
 
@@ -50,8 +50,8 @@ class GameView(context: Context) : View(context) {
         canvas.drawText("AI MOTION  •  GOALKEEPER  •  ${s.score}/${s.shots}", w * 0.04f, h * 0.07f, paint)
 
         paint.textSize = h * 0.026f
-        paint.color = 0xFFAAAAAA.toInt()
-        val tracking = if (pose != null) "BODY TRACKED" else "STEP INTO CAMERA"
+        paint.color = if (pose != null) 0xFFB8FFCA.toInt() else 0xFFFFC7C7.toInt()
+        val tracking = if (pose != null) "LIVE BODY TRACKING" else "TRACKING LOST — STEP INTO CAMERA"
         canvas.drawText(tracking, w * 0.04f, h * 0.11f, paint)
 
         postInvalidateOnAnimation()

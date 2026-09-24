@@ -25,10 +25,18 @@ class FrameAnalyzer(
     )
 
     private val processing = AtomicBoolean(false)
+    private val closeRequested = AtomicBoolean(false)
+    private val detectorClosed = AtomicBoolean(false)
     private val frames = AtomicLong(0)
     private var windowStart = System.nanoTime()
 
     override fun analyze(imageProxy: ImageProxy) {
+        if (closeRequested.get()) {
+            imageProxy.close()
+            closeDetectorOnce()
+            return
+        }
+
         if (!processing.compareAndSet(false, true)) {
             imageProxy.close()
             return
@@ -38,6 +46,7 @@ class FrameAnalyzer(
         if (mediaImage == null) {
             processing.set(false)
             imageProxy.close()
+            if (closeRequested.get()) closeDetectorOnce()
             return
         }
 
@@ -50,6 +59,8 @@ class FrameAnalyzer(
 
         detector.process(input)
             .addOnSuccessListener { pose ->
+                if (closeRequested.get()) return@addOnSuccessListener
+
                 val points = LinkedHashMap<Joint, PosePoint>()
                 for ((joint, type) in landmarkMap) {
                     val landmark = pose.getPoseLandmark(type) ?: continue
@@ -60,6 +71,7 @@ class FrameAnalyzer(
                         confidence = landmark.inFrameLikelihood
                     )
                 }
+
                 if (points.isNotEmpty()) {
                     onPose(
                         BodyPose(
@@ -70,23 +82,36 @@ class FrameAnalyzer(
                     )
                 }
             }
-            .addOnFailureListener(onError)
+            .addOnFailureListener {
+                if (!closeRequested.get()) onError(it)
+            }
             .addOnCompleteListener {
                 val count = frames.incrementAndGet()
                 val now = System.nanoTime()
                 val elapsed = now - windowStart
-                if (elapsed >= 1_000_000_000L) {
+
+                if (!closeRequested.get() && elapsed >= 1_000_000_000L) {
                     onFps(count * 1_000_000_000f / elapsed)
                     frames.set(0)
                     windowStart = now
                 }
+
                 imageProxy.close()
                 processing.set(false)
+
+                if (closeRequested.get()) closeDetectorOnce()
             }
     }
 
-    fun close() {
-        detector.close()
+    fun requestClose() {
+        closeRequested.set(true)
+        if (!processing.get()) closeDetectorOnce()
+    }
+
+    private fun closeDetectorOnce() {
+        if (detectorClosed.compareAndSet(false, true)) {
+            detector.close()
+        }
     }
 
     companion object {

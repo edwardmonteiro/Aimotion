@@ -5,16 +5,17 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RadialGradient
 import android.graphics.Shader
+import android.os.SystemClock
 import android.view.View
 import com.edwardresearchlabs.aimotion.motion.BodyPose
 import com.edwardresearchlabs.aimotion.motion.Joint
 import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.min
 
 class AvatarView(context: Context) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     @Volatile private var pose: BodyPose? = null
+    @Volatile private var lastPoseAtMs: Long = 0L
     @Volatile var mirrorX: Boolean = true
 
     init {
@@ -23,12 +24,12 @@ class AvatarView(context: Context) : View(context) {
 
     fun submitPose(newPose: BodyPose) {
         pose = newPose
+        lastPoseAtMs = SystemClock.elapsedRealtime()
         postInvalidateOnAnimation()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val current = pose
 
         paint.style = Paint.Style.FILL
         paint.shader = RadialGradient(
@@ -44,11 +45,15 @@ class AvatarView(context: Context) : View(context) {
 
         drawFloor(canvas)
 
+        val current = pose?.takeIf {
+            SystemClock.elapsedRealtime() - lastPoseAtMs <= 450L
+        }
+
         if (current == null || current.trackedPointCount < 8) {
             paint.color = 0xFFFFFFFF.toInt()
             paint.textAlign = Paint.Align.CENTER
             paint.textSize = height * 0.045f
-            canvas.drawText("STEP INTO VIEW", width * 0.5f, height * 0.5f, paint)
+            canvas.drawText("TRACKING LOST — STEP INTO VIEW", width * 0.5f, height * 0.5f, paint)
             paint.textAlign = Paint.Align.LEFT
             postInvalidateOnAnimation()
             return
@@ -81,7 +86,7 @@ class AvatarView(context: Context) : View(context) {
 
         paint.color = 0xFFFFFFFF.toInt()
         paint.textSize = height * 0.032f
-        canvas.drawText("AVATAR TEST  •  2.5D BODY", width * 0.04f, height * 0.07f, paint)
+        canvas.drawText("AVATAR TEST  •  LIVE 2.5D BODY", width * 0.04f, height * 0.07f, paint)
         paint.color = 0xFF98A2B3.toInt()
         paint.textSize = height * 0.024f
         canvas.drawText("${current.trackedPointCount}/33 points", width * 0.04f, height * 0.105f, paint)
@@ -130,7 +135,6 @@ class AvatarView(context: Context) : View(context) {
         paint.strokeWidth = height * 0.012f * depth
         paint.color = 0xFFE6E8EC.toInt()
         canvas.drawLine(aa.first, aa.second, bb.first, bb.second, paint)
-
         paint.strokeCap = Paint.Cap.BUTT
     }
 

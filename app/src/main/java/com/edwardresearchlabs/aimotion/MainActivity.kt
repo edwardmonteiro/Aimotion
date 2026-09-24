@@ -54,6 +54,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
     private var cameraProvider: ProcessCameraProvider? = null
     private var analyzer: FrameAnalyzer? = null
     private var presentation: MotionPresentation? = null
+    private var bindGeneration: Long = 0L
 
     private var currentMode = TestMode.MIRROR
     private var useFrontCamera = true
@@ -92,6 +93,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
 
         previewView = PreviewView(this).apply {
             scaleType = PreviewView.ScaleType.FIT_CENTER
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         }
         root.addView(previewView, fullScreenParams())
 
@@ -111,7 +113,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         }
 
         val title = TextView(this).apply {
-            text = "AI MOTION  V0.3"
+            text = "AI MOTION  V0.3.1"
             textSize = 24f
             setTextColor(Color.WHITE)
         }
@@ -140,8 +142,8 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
                 useFrontCamera = !useFrontCamera
                 MotionRuntime.frontCamera = useFrontCamera
                 motionEngine.resetCalibration()
-                rebindCamera()
                 applyMode()
+                rebindCamera()
             }
         }
 
@@ -149,6 +151,8 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
             text = "RECALIBRATE"
             setOnClickListener {
                 motionEngine.resetCalibration()
+                MotionRuntime.clearTracking()
+                trackedPoints = 0
                 lastEvent = "calibration reset"
                 updateStatus()
             }
@@ -178,13 +182,15 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
             text = label
             setOnClickListener {
                 currentMode = mode
-                if (mode == TestMode.PLAY && useFrontCamera) {
+
+                if (mode == TestMode.PLAY) {
                     useFrontCamera = false
                     MotionRuntime.frontCamera = false
-                    motionEngine.resetCalibration()
-                    rebindCamera()
                 }
+
+                motionEngine.resetCalibration()
                 applyMode()
+                rebindCamera()
             }
         }
     }
@@ -222,10 +228,11 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
 
         cameraButton.text = "CAMERA: ${if (useFrontCamera) "FRONT" else "REAR"}"
         modeView.text = when (currentMode) {
-            TestMode.MIRROR -> "MIRROR TEST  •  live camera + skeleton"
-            TestMode.AVATAR -> "AVATAR TEST  •  body drives 2.5D robot"
-            TestMode.PLAY -> "PLAY MODE  •  rear camera + Goalkeeper"
+            TestMode.MIRROR -> "MIRROR TEST  •  preview + skeleton"
+            TestMode.AVATAR -> "AVATAR TEST  •  analysis-only tracking"
+            TestMode.PLAY -> "PLAY MODE  •  analysis-only rear camera"
         }
+
         updateStatus()
     }
 
@@ -239,6 +246,18 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
 
     private fun rebindCamera() {
         val provider = cameraProvider ?: return
+        val generation = ++bindGeneration
+
+        provider.unbindAll()
+        analyzer?.requestClose()
+        analyzer = null
+
+        MotionRuntime.clearTracking()
+        fps = 0f
+        trackedPoints = 0
+        latencyMs = 0L
+        lastEvent = "waiting for live pose"
+
         val requested = if (useFrontCamera) {
             CameraSelector.DEFAULT_FRONT_CAMERA
         } else {
@@ -253,21 +272,19 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
             CameraSelector.DEFAULT_BACK_CAMERA
         }
 
-        val preview = Preview.Builder().build().also {
-            it.surfaceProvider = previewView.surfaceProvider
-        }
-
         val analysis = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
 
-        analyzer?.close()
-        analyzer = FrameAnalyzer(
+        val newAnalyzer = FrameAnalyzer(
             onFps = {
+                if (generation != bindGeneration) return@FrameAnalyzer
                 fps = it
                 runOnUiThread { updateStatus() }
             },
             onPose = { pose, inferenceMs ->
+                if (generation != bindGeneration) return@FrameAnalyzer
+
                 val events = motionEngine.update(pose)
                 trackedPoints = pose.trackedPointCount
                 latencyMs = inferenceMs
@@ -287,14 +304,26 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
                 }
             },
             onError = {
-                runOnUiThread { updateStatus("Pose error: ${it.javaClass.simpleName}") }
+                if (generation == bindGeneration) {
+                    runOnUiThread {
+                        updateStatus("Pose error: ${it.javaClass.simpleName}")
+                    }
+                }
             }
         )
 
-        analysis.setAnalyzer(cameraExecutor, analyzer!!)
+        analyzer = newAnalyzer
+        analysis.setAnalyzer(cameraExecutor, newAnalyzer)
 
-        provider.unbindAll()
-        provider.bindToLifecycle(this, selector, preview, analysis)
+        if (currentMode == TestMode.MIRROR) {
+            val preview = Preview.Builder().build().also {
+                it.surfaceProvider = previewView.surfaceProvider
+            }
+            provider.bindToLifecycle(this, selector, preview, analysis)
+        } else {
+            provider.bindToLifecycle(this, selector, analysis)
+        }
+
         updateStatus()
     }
 
@@ -317,7 +346,11 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
     }
 
     private fun updateStatus(extra: String? = null) {
+        val poseAge = MotionRuntime.poseAgeMs()
+        val live = poseAge <= 450L
+
         val bodyStatus = when {
+            !live -> "SEARCHING"
             trackedPoints >= 25 -> "TRACKED"
             trackedPoints > 0 -> "PARTIAL"
             else -> "SEARCHING"
@@ -327,8 +360,9 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
             appendLine("Frames: %.1f FPS".format(fps))
             appendLine("Body: $bodyStatus ($trackedPoints/33)")
             appendLine("Inference: ${latencyMs} ms")
+            appendLine("Pose age: ${if (poseAge == Long.MAX_VALUE) "-" else "${poseAge} ms"}")
             appendLine("Calibration: ${if (motionEngine.calibration != null) "READY" else "stand naturally"}")
-            appendLine("HDMI: ${if (presentation != null) "CONNECTED" else "not needed for test"}")
+            appendLine("Pipeline: ${if (currentMode == TestMode.MIRROR) "PREVIEW + ANALYSIS" else "ANALYSIS ONLY"}")
             append("Last motion: $lastEvent")
             if (!extra.isNullOrBlank()) appendLine().append(extra)
         }
@@ -339,9 +373,11 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
     override fun onDisplayChanged(displayId: Int) = Unit
 
     override fun onDestroy() {
+        bindGeneration++
         displayManager.unregisterDisplayListener(this)
         presentation?.dismiss()
-        analyzer?.close()
+        cameraProvider?.unbindAll()
+        analyzer?.requestClose()
         cameraExecutor.shutdown()
         super.onDestroy()
     }
