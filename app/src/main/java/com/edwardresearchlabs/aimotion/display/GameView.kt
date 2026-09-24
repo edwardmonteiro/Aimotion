@@ -86,6 +86,8 @@ class GameView(context: Context) : View(context) {
         game.reset()
         particles.clear()
         labels.clear()
+        lastWristLeft = null
+        lastWristRight = null
         invalidate()
     }
 
@@ -334,7 +336,7 @@ class GameView(context: Context) : View(context) {
             val pa = pose[a] ?: continue
             val pb = pose[b] ?: continue
             if (pa.confidence < 0.42f || pb.confidence < 0.42f) continue
-            canvas.drawLine((1f-pa.x)*w, pa.y*h, (1f-pb.x)*w, pb.y*h, paint)
+            canvas.drawLine(MotionRuntime.mapX(pa.x)*w, pa.y*h, MotionRuntime.mapX(pb.x)*w, pb.y*h, paint)
         }
 
         paint.strokeCap = Paint.Cap.BUTT
@@ -342,7 +344,7 @@ class GameView(context: Context) : View(context) {
         for (joint in listOf(Joint.LEFT_WRIST, Joint.RIGHT_WRIST, Joint.LEFT_ANKLE, Joint.RIGHT_ANKLE)) {
             val p = pose[joint] ?: continue
             if (p.confidence < 0.45f) continue
-            val cx = (1f-p.x)*w
+            val cx = MotionRuntime.mapX(p.x)*w
             val cy = p.y*h
 
             paint.maskFilter = BlurMaskFilter(h*0.018f, BlurMaskFilter.Blur.NORMAL)
@@ -360,7 +362,7 @@ class GameView(context: Context) : View(context) {
         val p = pose[joint] ?: return
         if (p.confidence < 0.45f) return
 
-        val current = Pair((1f-p.x)*w, p.y*h)
+        val current = Pair(MotionRuntime.mapX(p.x)*w, p.y*h)
         val previous = if (left) lastWristLeft else lastWristRight
 
         if (previous != null) {
@@ -394,7 +396,7 @@ class GameView(context: Context) : View(context) {
         for ((a, b) in segments) {
             val pa = pose[a] ?: continue
             val pb = pose[b] ?: continue
-            canvas.drawLine((1f-pa.x)*w, pa.y*h, (1f-pb.x)*w, pb.y*h, paint)
+            canvas.drawLine(MotionRuntime.mapX(pa.x)*w, pa.y*h, MotionRuntime.mapX(pb.x)*w, pb.y*h, paint)
         }
 
         paint.color = 0xAA22C55E.toInt()

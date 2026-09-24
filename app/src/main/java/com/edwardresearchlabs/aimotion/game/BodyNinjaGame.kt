@@ -2,6 +2,7 @@ package com.edwardresearchlabs.aimotion.game
 
 import com.edwardresearchlabs.aimotion.motion.BodyPose
 import com.edwardresearchlabs.aimotion.motion.Joint
+import com.edwardresearchlabs.aimotion.motion.MotionRuntime
 import com.edwardresearchlabs.aimotion.motion.PosePoint
 import kotlin.math.hypot
 import kotlin.math.max
@@ -293,9 +294,9 @@ class BodyNinjaGame {
             val b = pose[bJoint] ?: continue
             if (a.confidence < 0.42f || b.confidence < 0.42f) continue
 
-            val ax = 1f - a.x
+            val ax = MotionRuntime.mapX(a.x)
             val ay = a.y
-            val bx = 1f - b.x
+            val bx = MotionRuntime.mapX(b.x)
             val by = b.y
 
             val capsuleRadius = if (target.type == NinjaTargetType.HAND) 0.032f else 0.038f
@@ -352,7 +353,7 @@ class BodyNinjaGame {
         val lh = pose[Joint.LEFT_HIP] ?: return false
         val rh = pose[Joint.RIGHT_HIP] ?: return false
 
-        val xs = listOf(1f - ls.x, 1f - rs.x, 1f - lh.x, 1f - rh.x)
+        val xs = listOf(MotionRuntime.mapX(ls.x), MotionRuntime.mapX(rs.x), MotionRuntime.mapX(lh.x), MotionRuntime.mapX(rh.x))
         val ys = listOf(ls.y, rs.y, lh.y, rh.y)
         val left = xs.minOrNull()!! - 0.035f
         val right = xs.maxOrNull()!! + 0.035f

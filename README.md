@@ -1,26 +1,18 @@
 # AI Motion
 
-**Your body is the controller.**
+## V0.5.2 — Body viewport fix
 
-## V0.5.1 — Hit crash hotfix
-
-V0.5.1 fixes a runtime crash triggered by the first in-game impact.
+This hotfix corrects body placement in Body Ninja.
 
 ### Root cause
-V0.5 introduced haptic feedback but the Android manifest did not declare the VIBRATE permission.
+The game view still applied a fixed horizontal mirror transform even when the rear camera was active. Rendering and collision coordinates could therefore disagree with the actual camera orientation.
 
-### Fixes
-- declares android.permission.VIBRATE
-- haptic feedback is guarded and cannot crash gameplay
-- ToneGenerator feedback is guarded and optional
-- the game remains playable even if sound or vibration fails on a device
+### Fix
+- front camera mirrors X
+- rear camera preserves X
+- first reliable torso center becomes a viewport anchor
+- avatar starts centered without eliminating later lateral movement
+- rendering and collision physics use the same coordinate mapper
+- wrist trails reset when a new game starts
 
-V0.5 features remain unchanged:
-- adaptive pose smoothing
-- short prediction
-- capsule collisions
-- velocity-based impacts
-- perfect hits
-- progressive levels
-- accuracy and reaction metrics
-- physics debug overlay
+V0.5.1 hit-crash safeguards remain in place.
