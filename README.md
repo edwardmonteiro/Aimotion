@@ -2,29 +2,43 @@
 
 **Your body is the controller.**
 
-## V0.3.1 — Play tracking hotfix
+## V0.4 — Body Ninja
 
-This patch fixes a Play-mode tracking freeze seen after switching from the front-camera test modes.
+V0.4 replaces the placeholder-looking Play prototype with a purpose-built body-controlled game.
 
-### Changes
+### Body Ninja
 
-- Mirror mode binds Preview + ImageAnalysis.
-- Avatar and Play bind ImageAnalysis only.
-- Camera sessions are fully unbound before switching lenses or modes.
-- Old pose analyzers finish safely before closing.
-- Late callbacks from an old camera session are ignored.
-- Tracking state is cleared on each mode/lens transition.
-- Game and avatar reject stale poses instead of freezing the previous body position.
-- Diagnostic panel now shows pose age and active pipeline.
+Three object classes:
 
-CameraX supports individual use cases independently, so Play does not need a preview surface.
+- cyan orb: hit with either hand
+- amber core: hit with either foot
+- red hazard: dodge with your torso
 
-### Test
+The game includes:
 
-1. Start in MIRROR.
-2. Confirm live skeleton.
-3. Tap AVATAR and move continuously.
-4. Tap PLAY.
-5. Keep moving arms and torso.
-6. Pose age should remain under roughly 450 ms while tracking.
-7. If tracking is lost, the game should display TRACKING LOST instead of freezing an old avatar.
+- live body skeleton
+- wrist motion trails
+- hit particles
+- floating impact labels
+- score
+- combo multiplier
+- lives
+- increasing spawn rate
+- neon arena with perspective grid
+- no external game assets required
+
+### Test goal
+
+This version is not about content volume.
+
+It answers one question:
+
+> Does the tracked body feel accurate, responsive and fun enough to be a controller?
+
+### Modes
+
+- MIRROR: front camera + live skeleton
+- AVATAR: 2.5D tracked avatar
+- NINJA: rear-camera body game
+
+All pose inference remains local.

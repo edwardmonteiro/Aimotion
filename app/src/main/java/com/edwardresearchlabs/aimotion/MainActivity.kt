@@ -35,7 +35,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
     private enum class TestMode {
         MIRROR,
         AVATAR,
-        PLAY
+        NINJA
     }
 
     private lateinit var root: FrameLayout
@@ -113,7 +113,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         }
 
         val title = TextView(this).apply {
-            text = "AI MOTION  V0.3.1"
+            text = "AI MOTION  V0.4"
             textSize = 24f
             setTextColor(Color.WHITE)
         }
@@ -134,7 +134,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
 
         modeRow.addView(modeButton("MIRROR", TestMode.MIRROR))
         modeRow.addView(modeButton("AVATAR", TestMode.AVATAR))
-        modeRow.addView(modeButton("PLAY", TestMode.PLAY))
+        modeRow.addView(modeButton("NINJA", TestMode.NINJA))
 
         cameraButton = Button(this).apply {
             text = "CAMERA: FRONT"
@@ -183,7 +183,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
             setOnClickListener {
                 currentMode = mode
 
-                if (mode == TestMode.PLAY) {
+                if (mode == TestMode.NINJA) {
                     useFrontCamera = false
                     MotionRuntime.frontCamera = false
                 }
@@ -218,7 +218,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
                 avatarView.visibility = View.VISIBLE
                 gameView.visibility = View.GONE
             }
-            TestMode.PLAY -> {
+            TestMode.NINJA -> {
                 previewView.visibility = View.GONE
                 poseOverlay.visibility = View.GONE
                 avatarView.visibility = View.GONE
@@ -229,8 +229,8 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         cameraButton.text = "CAMERA: ${if (useFrontCamera) "FRONT" else "REAR"}"
         modeView.text = when (currentMode) {
             TestMode.MIRROR -> "MIRROR TEST  •  preview + skeleton"
-            TestMode.AVATAR -> "AVATAR TEST  •  analysis-only tracking"
-            TestMode.PLAY -> "PLAY MODE  •  analysis-only rear camera"
+            TestMode.AVATAR -> "AVATAR TEST  •  live 2.5D body"
+            TestMode.NINJA -> "BODY NINJA  •  hands, feet and dodge"
         }
 
         updateStatus()
@@ -288,7 +288,10 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
                 val events = motionEngine.update(pose)
                 trackedPoints = pose.trackedPointCount
                 latencyMs = inferenceMs
-                if (events.isNotEmpty()) lastEvent = events.joinToString()
+
+                if (events.isNotEmpty()) {
+                    lastEvent = events.joinToString()
+                }
 
                 MotionRuntime.publish(
                     newPose = pose,
@@ -347,7 +350,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
 
     private fun updateStatus(extra: String? = null) {
         val poseAge = MotionRuntime.poseAgeMs()
-        val live = poseAge <= 450L
+        val live = poseAge <= 500L
 
         val bodyStatus = when {
             !live -> "SEARCHING"
@@ -362,7 +365,6 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
             appendLine("Inference: ${latencyMs} ms")
             appendLine("Pose age: ${if (poseAge == Long.MAX_VALUE) "-" else "${poseAge} ms"}")
             appendLine("Calibration: ${if (motionEngine.calibration != null) "READY" else "stand naturally"}")
-            appendLine("Pipeline: ${if (currentMode == TestMode.MIRROR) "PREVIEW + ANALYSIS" else "ANALYSIS ONLY"}")
             append("Last motion: $lastEvent")
             if (!extra.isNullOrBlank()) appendLine().append(extra)
         }
