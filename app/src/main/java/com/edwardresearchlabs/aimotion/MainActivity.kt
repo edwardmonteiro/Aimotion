@@ -27,18 +27,14 @@ import com.edwardresearchlabs.aimotion.display.MotionPresentation
 import com.edwardresearchlabs.aimotion.display.PoseOverlay
 import com.edwardresearchlabs.aimotion.motion.MotionEngine
 import com.edwardresearchlabs.aimotion.motion.MotionRuntime
+import com.edwardresearchlabs.aimotion.motion.PoseSmoother
 import com.edwardresearchlabs.aimotion.vision.FrameAnalyzer
 import java.util.concurrent.Executors
 
 class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
 
-    private enum class TestMode {
-        MIRROR,
-        AVATAR,
-        NINJA
-    }
+    private enum class TestMode { MIRROR, AVATAR, NINJA }
 
-    private lateinit var root: FrameLayout
     private lateinit var previewView: PreviewView
     private lateinit var poseOverlay: PoseOverlay
     private lateinit var avatarView: AvatarView
@@ -46,10 +42,12 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
     private lateinit var statusView: TextView
     private lateinit var modeView: TextView
     private lateinit var cameraButton: Button
+    private lateinit var debugButton: Button
     private lateinit var displayManager: DisplayManager
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private val motionEngine = MotionEngine()
+    private val poseSmoother = PoseSmoother()
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var analyzer: FrameAnalyzer? = null
@@ -59,10 +57,10 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
     private var currentMode = TestMode.MIRROR
     private var useFrontCamera = true
 
-    private var fps: Float = 0f
-    private var trackedPoints: Int = 0
-    private var latencyMs: Long = 0L
-    private var lastEvent: String = "none"
+    private var fps = 0f
+    private var trackedPoints = 0
+    private var latencyMs = 0L
+    private var lastEvent = "none"
 
     private val cameraPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -89,7 +87,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
     }
 
     private fun buildUi() {
-        root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
 
         previewView = PreviewView(this).apply {
             scaleType = PreviewView.ScaleType.FIT_CENTER
@@ -108,30 +106,27 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
 
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(24, 18, 24, 18)
+            setPadding(22, 16, 22, 16)
             setBackgroundColor(0xB8000000.toInt())
         }
 
         val title = TextView(this).apply {
-            text = "AI MOTION  V0.4"
-            textSize = 24f
+            text = "AI MOTION  V0.5"
+            textSize = 23f
             setTextColor(Color.WHITE)
         }
 
         modeView = TextView(this).apply {
-            textSize = 15f
+            textSize = 14f
             setTextColor(0xFF8FD3FF.toInt())
         }
 
         statusView = TextView(this).apply {
-            textSize = 14f
+            textSize = 13f
             setTextColor(0xFFD7D7D7.toInt())
         }
 
-        val modeRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-
+        val modeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         modeRow.addView(modeButton("MIRROR", TestMode.MIRROR))
         modeRow.addView(modeButton("AVATAR", TestMode.AVATAR))
         modeRow.addView(modeButton("NINJA", TestMode.NINJA))
@@ -141,18 +136,24 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
             setOnClickListener {
                 useFrontCamera = !useFrontCamera
                 MotionRuntime.frontCamera = useFrontCamera
-                motionEngine.resetCalibration()
+                resetTracking()
                 applyMode()
                 rebindCamera()
+            }
+        }
+
+        debugButton = Button(this).apply {
+            text = "PHYSICS: OFF"
+            setOnClickListener {
+                val enabled = gameView.togglePhysicsDebug()
+                text = "PHYSICS: ${if (enabled) "ON" else "OFF"}"
             }
         }
 
         val calibrate = Button(this).apply {
             text = "RECALIBRATE"
             setOnClickListener {
-                motionEngine.resetCalibration()
-                MotionRuntime.clearTracking()
-                trackedPoints = 0
+                resetTracking()
                 lastEvent = "calibration reset"
                 updateStatus()
             }
@@ -163,6 +164,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         panel.addView(statusView)
         panel.addView(modeRow)
         panel.addView(cameraButton)
+        panel.addView(debugButton)
         panel.addView(calibrate)
 
         root.addView(panel, FrameLayout.LayoutParams(
@@ -170,8 +172,8 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
             ViewGroup.LayoutParams.WRAP_CONTENT,
             Gravity.TOP or Gravity.START
         ).apply {
-            leftMargin = 20
-            topMargin = 20
+            leftMargin = 18
+            topMargin = 18
         })
 
         setContentView(root)
@@ -182,17 +184,23 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
             text = label
             setOnClickListener {
                 currentMode = mode
-
                 if (mode == TestMode.NINJA) {
                     useFrontCamera = false
                     MotionRuntime.frontCamera = false
+                    gameView.resetGame()
                 }
-
-                motionEngine.resetCalibration()
+                resetTracking()
                 applyMode()
                 rebindCamera()
             }
         }
+    }
+
+    private fun resetTracking() {
+        motionEngine.resetCalibration()
+        poseSmoother.reset()
+        MotionRuntime.clearTracking()
+        trackedPoints = 0
     }
 
     private fun fullScreenParams() = FrameLayout.LayoutParams(
@@ -205,34 +213,18 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         poseOverlay.mirrorX = mirror
         avatarView.mirrorX = mirror
 
-        when (currentMode) {
-            TestMode.MIRROR -> {
-                previewView.visibility = View.VISIBLE
-                poseOverlay.visibility = View.VISIBLE
-                avatarView.visibility = View.GONE
-                gameView.visibility = View.GONE
-            }
-            TestMode.AVATAR -> {
-                previewView.visibility = View.GONE
-                poseOverlay.visibility = View.GONE
-                avatarView.visibility = View.VISIBLE
-                gameView.visibility = View.GONE
-            }
-            TestMode.NINJA -> {
-                previewView.visibility = View.GONE
-                poseOverlay.visibility = View.GONE
-                avatarView.visibility = View.GONE
-                gameView.visibility = View.VISIBLE
-            }
-        }
+        previewView.visibility = if (currentMode == TestMode.MIRROR) View.VISIBLE else View.GONE
+        poseOverlay.visibility = if (currentMode == TestMode.MIRROR) View.VISIBLE else View.GONE
+        avatarView.visibility = if (currentMode == TestMode.AVATAR) View.VISIBLE else View.GONE
+        gameView.visibility = if (currentMode == TestMode.NINJA) View.VISIBLE else View.GONE
+        debugButton.visibility = if (currentMode == TestMode.NINJA) View.VISIBLE else View.GONE
 
         cameraButton.text = "CAMERA: ${if (useFrontCamera) "FRONT" else "REAR"}"
         modeView.text = when (currentMode) {
-            TestMode.MIRROR -> "MIRROR TEST  •  preview + skeleton"
-            TestMode.AVATAR -> "AVATAR TEST  •  live 2.5D body"
-            TestMode.NINJA -> "BODY NINJA  •  hands, feet and dodge"
+            TestMode.MIRROR -> "MIRROR  •  smoothed skeleton"
+            TestMode.AVATAR -> "AVATAR  •  smoothed + predicted pose"
+            TestMode.NINJA -> "FEEL UPDATE  •  capsules + velocity + perfect hits"
         }
-
         updateStatus()
     }
 
@@ -251,19 +243,13 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         provider.unbindAll()
         analyzer?.requestClose()
         analyzer = null
+        resetTracking()
 
-        MotionRuntime.clearTracking()
         fps = 0f
-        trackedPoints = 0
         latencyMs = 0L
         lastEvent = "waiting for live pose"
 
-        val requested = if (useFrontCamera) {
-            CameraSelector.DEFAULT_FRONT_CAMERA
-        } else {
-            CameraSelector.DEFAULT_BACK_CAMERA
-        }
-
+        val requested = if (useFrontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
         val selector = if (provider.hasCamera(requested)) {
             requested
         } else {
@@ -282,16 +268,15 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
                 fps = it
                 runOnUiThread { updateStatus() }
             },
-            onPose = { pose, inferenceMs ->
+            onPose = { rawPose, inferenceMs ->
                 if (generation != bindGeneration) return@FrameAnalyzer
 
+                val pose = poseSmoother.filter(rawPose)
                 val events = motionEngine.update(pose)
+
                 trackedPoints = pose.trackedPointCount
                 latencyMs = inferenceMs
-
-                if (events.isNotEmpty()) {
-                    lastEvent = events.joinToString()
-                }
+                if (events.isNotEmpty()) lastEvent = events.joinToString()
 
                 MotionRuntime.publish(
                     newPose = pose,
@@ -308,9 +293,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
             },
             onError = {
                 if (generation == bindGeneration) {
-                    runOnUiThread {
-                        updateStatus("Pose error: ${it.javaClass.simpleName}")
-                    }
+                    runOnUiThread { updateStatus("Pose error: ${it.javaClass.simpleName}") }
                 }
             }
         )
@@ -319,9 +302,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         analysis.setAnalyzer(cameraExecutor, newAnalyzer)
 
         if (currentMode == TestMode.MIRROR) {
-            val preview = Preview.Builder().build().also {
-                it.surfaceProvider = previewView.surfaceProvider
-            }
+            val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
             provider.bindToLifecycle(this, selector, preview, analysis)
         } else {
             provider.bindToLifecycle(this, selector, analysis)
@@ -331,27 +312,20 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
     }
 
     private fun showExternalDisplay() {
-        val displays = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
-        val target = displays.firstOrNull()
-
+        val target = displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION).firstOrNull()
         if (target == null) {
             presentation?.dismiss()
             presentation = null
-            updateStatus()
             return
         }
-
         if (presentation?.display?.displayId == target.displayId) return
-
         presentation?.dismiss()
         presentation = MotionPresentation(this, target).also { it.show() }
-        updateStatus()
     }
 
     private fun updateStatus(extra: String? = null) {
         val poseAge = MotionRuntime.poseAgeMs()
         val live = poseAge <= 500L
-
         val bodyStatus = when {
             !live -> "SEARCHING"
             trackedPoints >= 25 -> "TRACKED"
@@ -360,12 +334,10 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         }
 
         statusView.text = buildString {
-            appendLine("Frames: %.1f FPS".format(fps))
-            appendLine("Body: $bodyStatus ($trackedPoints/33)")
-            appendLine("Inference: ${latencyMs} ms")
-            appendLine("Pose age: ${if (poseAge == Long.MAX_VALUE) "-" else "${poseAge} ms"}")
-            appendLine("Calibration: ${if (motionEngine.calibration != null) "READY" else "stand naturally"}")
-            append("Last motion: $lastEvent")
+            appendLine("Frames %.1f  •  Inference ${latencyMs}ms".format(fps))
+            appendLine("Body $bodyStatus  •  $trackedPoints/33  •  Smooth ON")
+            appendLine("Calibration ${if (motionEngine.calibration != null) "READY" else "stand naturally"}")
+            append("Motion $lastEvent")
             if (!extra.isNullOrBlank()) appendLine().append(extra)
         }
     }

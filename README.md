@@ -2,43 +2,36 @@
 
 **Your body is the controller.**
 
-## V0.4 — Body Ninja
+## V0.5 — Feel Update
 
-V0.4 replaces the placeholder-looking Play prototype with a purpose-built body-controlled game.
+This release focuses on control quality rather than adding more games.
 
-### Body Ninja
+### Tracking
+- adaptive temporal smoothing
+- short motion prediction for fast limbs
+- brief recovery of missing landmarks
 
-Three object classes:
+### Physics
+- arm and leg capsule collision
+- velocity-aware impacts
+- PERFECT hits for fast, clean strikes
 
-- cyan orb: hit with either hand
-- amber core: hit with either foot
-- red hazard: dodge with your torso
+### Game feel
+- audio feedback
+- haptic feedback
+- screen shake
+- short slow-motion on perfect hits
+- stronger particles
+- progressive levels
 
-The game includes:
+### Metrics
+- accuracy
+- reaction time
+- perfect hits
+- best combo
+- level
 
-- live body skeleton
-- wrist motion trails
-- hit particles
-- floating impact labels
-- score
-- combo multiplier
-- lives
-- increasing spawn rate
-- neon arena with perspective grid
-- no external game assets required
+### Debug
+- PHYSICS toggle draws the active limb collision segments
 
-### Test goal
-
-This version is not about content volume.
-
-It answers one question:
-
-> Does the tracked body feel accurate, responsive and fun enough to be a controller?
-
-### Modes
-
-- MIRROR: front camera + live skeleton
-- AVATAR: 2.5D tracked avatar
-- NINJA: rear-camera body game
-
-All pose inference remains local.
+The goal of V0.5 is simple: movement should feel connected, responsive and intentional.

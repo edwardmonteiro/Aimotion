@@ -9,11 +9,14 @@ import android.graphics.Path
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
-import android.os.SystemClock
+import android.media.AudioManager
+import android.media.ToneGenerator
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.view.View
 import com.edwardresearchlabs.aimotion.game.BodyNinjaGame
 import com.edwardresearchlabs.aimotion.game.NinjaHit
-import com.edwardresearchlabs.aimotion.game.NinjaTarget
 import com.edwardresearchlabs.aimotion.game.NinjaTargetType
 import com.edwardresearchlabs.aimotion.motion.BodyPose
 import com.edwardresearchlabs.aimotion.motion.Joint
@@ -39,7 +42,8 @@ class GameView(context: Context) : View(context) {
         val text: String,
         var x: Float,
         var y: Float,
-        var life: Float
+        var life: Float,
+        val perfect: Boolean
     )
 
     private val game = BodyNinjaGame()
@@ -49,31 +53,67 @@ class GameView(context: Context) : View(context) {
     private val labels = mutableListOf<FloatLabel>()
     private val random = Random(7)
 
+    private val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 55)
+    private val vibrator: Vibrator? = if (android.os.Build.VERSION.SDK_INT >= 31) {
+        val manager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+        manager.defaultVibrator
+    } else {
+        @Suppress("DEPRECATION")
+        context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+    }
+
     private var lastFrame = System.nanoTime()
     private var lastWristLeft: Pair<Float, Float>? = null
     private var lastWristRight: Pair<Float, Float>? = null
+
+    private var shakeUntilNs = 0L
+    private var shakeStrengthPx = 0f
+    private var slowUntilNs = 0L
+    private var debugPhysics = false
 
     init {
         setLayerType(LAYER_TYPE_SOFTWARE, null)
         setBackgroundColor(0xFF05060A.toInt())
     }
 
+    fun togglePhysicsDebug(): Boolean {
+        debugPhysics = !debugPhysics
+        invalidate()
+        return debugPhysics
+    }
+
+    fun resetGame() {
+        game.reset()
+        particles.clear()
+        labels.clear()
+        invalidate()
+    }
+
+    override fun onDetachedFromWindow() {
+        tone.release()
+        super.onDetachedFromWindow()
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
         val now = System.nanoTime()
-        val dt = ((now - lastFrame) / 1_000_000_000f).coerceIn(0.001f, 0.05f)
+        val rawDt = ((now - lastFrame) / 1_000_000_000f).coerceIn(0.001f, 0.05f)
         lastFrame = now
+        val dt = if (now < slowUntilNs) rawDt * 0.24f else rawDt
 
         val pose = MotionRuntime.freshPose(500L)
         val hits = game.update(dt, pose)
-        for (hit in hits) explode(hit)
+        for (hit in hits) onHit(hit)
 
-        updateParticles(dt)
-        updateLabels(dt)
+        updateParticles(rawDt)
+        updateLabels(rawDt)
 
         val w = width.toFloat()
         val h = height.toFloat()
+
+        canvas.save()
+        applyShake(canvas, now)
 
         drawBackground(canvas, w, h)
         drawArena(canvas, w, h)
@@ -81,13 +121,55 @@ class GameView(context: Context) : View(context) {
 
         if (pose != null) {
             drawBody(canvas, pose, w, h)
+            if (debugPhysics) drawPhysics(canvas, pose, w, h)
         }
 
         drawParticles(canvas, w, h)
         drawHud(canvas, w, h, pose != null)
         drawLabels(canvas, w, h)
 
+        canvas.restore()
         postInvalidateOnAnimation()
+    }
+
+    private fun onHit(hit: NinjaHit) {
+        explode(hit)
+
+        if (hit.points > 0) {
+            if (hit.perfect) {
+                tone.startTone(ToneGenerator.TONE_PROP_ACK, 70)
+                slowUntilNs = System.nanoTime() + 95_000_000L
+                shakeUntilNs = System.nanoTime() + 120_000_000L
+                shakeStrengthPx = 8f
+                vibrate(32)
+            } else {
+                tone.startTone(ToneGenerator.TONE_PROP_BEEP, 45)
+                shakeUntilNs = System.nanoTime() + 70_000_000L
+                shakeStrengthPx = 3.5f
+                vibrate(16)
+            }
+        } else {
+            tone.startTone(ToneGenerator.TONE_PROP_NACK, 70)
+            shakeUntilNs = System.nanoTime() + 150_000_000L
+            shakeStrengthPx = 10f
+            vibrate(45)
+        }
+    }
+
+    private fun vibrate(ms: Long) {
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            vibrator?.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator?.vibrate(ms)
+        }
+    }
+
+    private fun applyShake(canvas: Canvas, now: Long) {
+        if (now >= shakeUntilNs) return
+        val dx = (random.nextFloat() - 0.5f) * shakeStrengthPx * 2f
+        val dy = (random.nextFloat() - 0.5f) * shakeStrengthPx * 2f
+        canvas.translate(dx, dy)
     }
 
     private fun drawBackground(canvas: Canvas, w: Float, h: Float) {
@@ -95,23 +177,19 @@ class GameView(context: Context) : View(context) {
         paint.shader = LinearGradient(
             0f, 0f, w, h,
             intArrayOf(
-                0xFF08111F.toInt(),
-                0xFF101827.toInt(),
-                0xFF06080E.toInt()
+                0xFF07101E.toInt(),
+                0xFF111B2C.toInt(),
+                0xFF05070C.toInt()
             ),
-            floatArrayOf(0f, 0.55f, 1f),
+            floatArrayOf(0f, 0.58f, 1f),
             Shader.TileMode.CLAMP
         )
         canvas.drawRect(0f, 0f, w, h, paint)
         paint.shader = null
 
         paint.shader = RadialGradient(
-            w * 0.5f,
-            h * 0.42f,
-            max(w, h) * 0.55f,
-            0x334CC9F0,
-            0x00000000,
-            Shader.TileMode.CLAMP
+            w * 0.5f, h * 0.42f, max(w, h) * 0.58f,
+            0x334CC9F0, 0x00000000, Shader.TileMode.CLAMP
         )
         canvas.drawRect(0f, 0f, w, h, paint)
         paint.shader = null
@@ -119,7 +197,6 @@ class GameView(context: Context) : View(context) {
 
     private fun drawArena(canvas: Canvas, w: Float, h: Float) {
         val horizon = h * 0.76f
-
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 2f
         paint.color = 0x244CC9F0
@@ -134,13 +211,6 @@ class GameView(context: Context) : View(context) {
             val y = horizon + (h - horizon) * t * t
             canvas.drawLine(0f, y, w, y, paint)
         }
-
-        paint.style = Paint.Style.FILL
-        paint.color = 0x18000000
-        canvas.drawRoundRect(
-            RectF(w * 0.03f, h * 0.03f, w * 0.97f, h * 0.96f),
-            32f, 32f, paint
-        )
     }
 
     private fun drawTargets(canvas: Canvas, w: Float, h: Float) {
@@ -165,14 +235,8 @@ class GameView(context: Context) : View(context) {
         paint.maskFilter = null
 
         paint.shader = RadialGradient(
-            cx - r * 0.28f,
-            cy - r * 0.28f,
-            r * 1.25f,
-            intArrayOf(
-                0xFFFFFFFF.toInt(),
-                0xFF60DFFF.toInt(),
-                0xFF136789.toInt()
-            ),
+            cx - r * 0.28f, cy - r * 0.28f, r * 1.25f,
+            intArrayOf(0xFFFFFFFF.toInt(), 0xFF60DFFF.toInt(), 0xFF136789.toInt()),
             floatArrayOf(0f, 0.45f, 1f),
             Shader.TileMode.CLAMP
         )
@@ -198,10 +262,8 @@ class GameView(context: Context) : View(context) {
         paint.style = Paint.Style.FILL
         paint.color = 0xFFF7B955.toInt()
         path.reset()
-
-        val sides = 6
-        for (i in 0 until sides) {
-            val a = rotation + i * (Math.PI * 2 / sides).toFloat()
+        for (i in 0 until 6) {
+            val a = rotation + i * (Math.PI * 2 / 6).toFloat()
             val x = cx + cos(a) * r
             val y = cy + sin(a) * r
             if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
@@ -224,14 +286,12 @@ class GameView(context: Context) : View(context) {
 
         canvas.save()
         canvas.rotate(rotation * 57.3f, cx, cy)
-
         paint.style = Paint.Style.FILL
         paint.color = 0xFFFF496C.toInt()
         path.reset()
 
-        val spikes = 12
-        for (i in 0 until spikes * 2) {
-            val angle = i * Math.PI.toFloat() / spikes
+        for (i in 0 until 24) {
+            val angle = i * Math.PI.toFloat() / 12
             val rr = if (i % 2 == 0) r else r * 0.58f
             val x = cx + cos(angle) * rr
             val y = cy + sin(angle) * rr
@@ -258,53 +318,33 @@ class GameView(context: Context) : View(context) {
             val pa = pose[a] ?: continue
             val pb = pose[b] ?: continue
             if (pa.confidence < 0.42f || pb.confidence < 0.42f) continue
-
-            canvas.drawLine(
-                (1f - pa.x) * w,
-                pa.y * h,
-                (1f - pb.x) * w,
-                pb.y * h,
-                paint
-            )
+            canvas.drawLine((1f-pa.x)*w, pa.y*h, (1f-pb.x)*w, pb.y*h, paint)
         }
 
         paint.strokeCap = Paint.Cap.BUTT
 
-        for (joint in listOf(
-            Joint.LEFT_WRIST,
-            Joint.RIGHT_WRIST,
-            Joint.LEFT_ANKLE,
-            Joint.RIGHT_ANKLE
-        )) {
+        for (joint in listOf(Joint.LEFT_WRIST, Joint.RIGHT_WRIST, Joint.LEFT_ANKLE, Joint.RIGHT_ANKLE)) {
             val p = pose[joint] ?: continue
             if (p.confidence < 0.45f) continue
+            val cx = (1f-p.x)*w
+            val cy = p.y*h
 
-            val cx = (1f - p.x) * w
-            val cy = p.y * h
-
-            paint.maskFilter = BlurMaskFilter(h * 0.018f, BlurMaskFilter.Blur.NORMAL)
+            paint.maskFilter = BlurMaskFilter(h*0.018f, BlurMaskFilter.Blur.NORMAL)
             paint.style = Paint.Style.FILL
             paint.color = 0xAA7DD3FC.toInt()
-            canvas.drawCircle(cx, cy, h * 0.028f, paint)
+            canvas.drawCircle(cx, cy, h*0.028f, paint)
             paint.maskFilter = null
 
             paint.color = 0xFFFFFFFF.toInt()
-            canvas.drawCircle(cx, cy, h * 0.012f, paint)
+            canvas.drawCircle(cx, cy, h*0.012f, paint)
         }
     }
 
-    private fun drawTrail(
-        canvas: Canvas,
-        pose: BodyPose,
-        w: Float,
-        h: Float,
-        joint: Joint,
-        left: Boolean
-    ) {
+    private fun drawTrail(canvas: Canvas, pose: BodyPose, w: Float, h: Float, joint: Joint, left: Boolean) {
         val p = pose[joint] ?: return
         if (p.confidence < 0.45f) return
 
-        val current = Pair((1f - p.x) * w, p.y * h)
+        val current = Pair((1f-p.x)*w, p.y*h)
         val previous = if (left) lastWristLeft else lastWristRight
 
         if (previous != null) {
@@ -319,27 +359,61 @@ class GameView(context: Context) : View(context) {
         if (left) lastWristLeft = current else lastWristRight = current
     }
 
+    private fun drawPhysics(canvas: Canvas, pose: BodyPose, w: Float, h: Float) {
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 3f
+        paint.color = 0xAA22C55E.toInt()
+
+        val segments = listOf(
+            Joint.LEFT_WRIST to Joint.LEFT_ELBOW,
+            Joint.LEFT_ELBOW to Joint.LEFT_SHOULDER,
+            Joint.RIGHT_WRIST to Joint.RIGHT_ELBOW,
+            Joint.RIGHT_ELBOW to Joint.RIGHT_SHOULDER,
+            Joint.LEFT_FOOT_INDEX to Joint.LEFT_ANKLE,
+            Joint.LEFT_ANKLE to Joint.LEFT_KNEE,
+            Joint.RIGHT_FOOT_INDEX to Joint.RIGHT_ANKLE,
+            Joint.RIGHT_ANKLE to Joint.RIGHT_KNEE
+        )
+
+        for ((a, b) in segments) {
+            val pa = pose[a] ?: continue
+            val pb = pose[b] ?: continue
+            canvas.drawLine((1f-pa.x)*w, pa.y*h, (1f-pb.x)*w, pb.y*h, paint)
+        }
+
+        paint.color = 0xAA22C55E.toInt()
+        paint.textSize = h * 0.022f
+        canvas.drawText("PHYSICS CAPSULES ON", w*0.055f, h*0.225f, paint)
+    }
+
     private fun explode(hit: NinjaHit) {
-        val count = if (hit.type == NinjaTargetType.DODGE) 16 else 24
+        val count = when {
+            hit.perfect -> 42
+            hit.type == NinjaTargetType.DODGE -> 18
+            else -> 26
+        }
+
         repeat(count) {
             val angle = random.nextFloat() * Math.PI.toFloat() * 2f
-            val speed = 0.12f + random.nextFloat() * 0.30f
+            val speed = 0.12f + random.nextFloat() * if (hit.perfect) 0.48f else 0.30f
             particles += Particle(
                 x = hit.x,
                 y = hit.y,
                 vx = cos(angle) * speed,
                 vy = sin(angle) * speed,
-                life = 0.55f + random.nextFloat() * 0.35f,
-                size = 0.004f + random.nextFloat() * 0.008f,
+                life = 0.55f + random.nextFloat() * 0.45f,
+                size = 0.004f + random.nextFloat() * if (hit.perfect) 0.012f else 0.008f,
                 type = hit.type
             )
         }
 
+        val speedText = if (hit.impactSpeed > 0f) "  %.1f".format(hit.impactSpeed) else ""
         labels += FloatLabel(
-            text = if (hit.points > 0) "${hit.label} +${hit.points}" else hit.label,
+            text = if (hit.points > 0) "${hit.label} +${hit.points}$speedText" else hit.label,
             x = hit.x,
             y = hit.y,
-            life = 0.75f
+            life = if (hit.perfect) 0.95f else 0.75f,
+            perfect = hit.perfect
         )
     }
 
@@ -352,7 +426,6 @@ class GameView(context: Context) : View(context) {
                 iterator.remove()
                 continue
             }
-
             p.x += p.vx * dt
             p.y += p.vy * dt
             p.vy += 0.24f * dt
@@ -378,20 +451,20 @@ class GameView(context: Context) : View(context) {
                 NinjaTargetType.FOOT -> 0xFFFBBF24.toInt()
                 NinjaTargetType.DODGE -> 0xFFFB7185.toInt()
             }
-            canvas.drawCircle(p.x * w, p.y * h, p.size * minOf(w, h), paint)
+            canvas.drawCircle(p.x*w, p.y*h, p.size*minOf(w,h), paint)
         }
         paint.alpha = 255
     }
 
     private fun drawLabels(canvas: Canvas, w: Float, h: Float) {
         paint.textAlign = Paint.Align.CENTER
-        paint.textSize = h * 0.038f
         paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
 
         for (label in labels) {
-            paint.alpha = (255 * label.life.coerceIn(0f, 1f)).toInt()
-            paint.color = 0xFFFFFFFF.toInt()
-            canvas.drawText(label.text, label.x * w, label.y * h, paint)
+            paint.alpha = (255 * label.life.coerceIn(0f,1f)).toInt()
+            paint.textSize = h * if (label.perfect) 0.052f else 0.038f
+            paint.color = if (label.perfect) 0xFFFFF4B2.toInt() else 0xFFFFFFFF.toInt()
+            canvas.drawText(label.text, label.x*w, label.y*h, paint)
         }
 
         paint.typeface = android.graphics.Typeface.DEFAULT
@@ -404,46 +477,38 @@ class GameView(context: Context) : View(context) {
 
         paint.style = Paint.Style.FILL
         paint.color = 0xA60A0F18.toInt()
-        canvas.drawRoundRect(
-            RectF(w * 0.035f, h * 0.035f, w * 0.40f, h * 0.16f),
-            h * 0.026f,
-            h * 0.026f,
-            paint
-        )
+        canvas.drawRoundRect(RectF(w*0.035f,h*0.035f,w*0.46f,h*0.175f), h*0.026f,h*0.026f,paint)
 
         paint.color = 0xFFFFFFFF.toInt()
         paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
         paint.textSize = h * 0.040f
-        canvas.drawText("BODY NINJA", w * 0.055f, h * 0.085f, paint)
+        canvas.drawText("BODY NINJA  •  LV ${state.level}", w*0.055f,h*0.082f,paint)
 
         paint.typeface = android.graphics.Typeface.DEFAULT
-        paint.textSize = h * 0.024f
+        paint.textSize = h * 0.022f
         paint.color = 0xFF94A3B8.toInt()
         canvas.drawText(
-            if (tracking) "LIVE BODY • HAND / FOOT / DODGE" else "STEP INTO CAMERA",
-            w * 0.055f,
-            h * 0.125f,
-            paint
+            if (tracking) "ACC ${state.accuracyPercent}%  •  REACT ${state.averageReactionMs}ms  •  PERFECT ${state.perfectHits}"
+            else "STEP INTO CAMERA",
+            w*0.055f,h*0.122f,paint
         )
 
         paint.textAlign = Paint.Align.RIGHT
         paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
-        paint.textSize = h * 0.054f
+        paint.textSize = h * 0.052f
         paint.color = 0xFFFFFFFF.toInt()
-        canvas.drawText(state.score.toString(), w * 0.94f, h * 0.085f, paint)
+        canvas.drawText(state.score.toString(), w*0.94f,h*0.082f,paint)
 
         paint.typeface = android.graphics.Typeface.DEFAULT
         paint.textSize = h * 0.026f
         paint.color = 0xFF67E8F9.toInt()
-        canvas.drawText("COMBO x${state.combo}", w * 0.94f, h * 0.125f, paint)
+        canvas.drawText("COMBO x${state.combo}", w*0.94f,h*0.123f,paint)
 
         paint.textAlign = Paint.Align.LEFT
-
         for (i in 0 until 3) {
             paint.style = Paint.Style.FILL
             paint.color = if (i < state.lives) 0xFFFF496C.toInt() else 0xFF253047.toInt()
-            val x = w * 0.055f + i * h * 0.034f
-            canvas.drawCircle(x, h * 0.185f, h * 0.010f, paint)
+            canvas.drawCircle(w*0.055f + i*h*0.034f, h*0.158f, h*0.010f, paint)
         }
     }
 }
