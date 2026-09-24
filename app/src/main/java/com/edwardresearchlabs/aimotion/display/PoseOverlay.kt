@@ -10,10 +10,16 @@ import com.edwardresearchlabs.aimotion.motion.Joint
 class PoseOverlay(context: Context) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     @Volatile private var pose: BodyPose? = null
+    @Volatile var mirrorX: Boolean = true
 
     fun submitPose(newPose: BodyPose) {
         pose = newPose
         postInvalidateOnAnimation()
+    }
+
+    private fun px(x: Float): Float {
+        val normalized = if (mirrorX) 1f - x else x
+        return normalized * width
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -28,14 +34,14 @@ class PoseOverlay(context: Context) : View(context) {
             val pa = current[a] ?: continue
             val pb = current[b] ?: continue
             if (pa.confidence < 0.45f || pb.confidence < 0.45f) continue
-            canvas.drawLine(pa.x * width, pa.y * height, pb.x * width, pb.y * height, paint)
+            canvas.drawLine(px(pa.x), pa.y * height, px(pb.x), pb.y * height, paint)
         }
 
         paint.style = Paint.Style.FILL
         paint.color = 0xFFFFFFFF.toInt()
         for (point in current.points.values) {
             if (point.confidence >= 0.5f) {
-                canvas.drawCircle(point.x * width, point.y * height, 7f, paint)
+                canvas.drawCircle(px(point.x), point.y * height, 7f, paint)
             }
         }
     }

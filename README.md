@@ -2,50 +2,51 @@
 
 **Your body is the controller.**
 
-AI Motion is a local-first Android experiment that turns a phone camera into a body-controlled game system and renders games on an external TV over USB-C/HDMI.
+AI Motion is a local-first Android experiment that turns the phone camera into a body-controlled game system.
 
-## V0.2 — Real Body Tracking
+## V0.3 — Fast Test Modes
 
-V0.2 replaces the placeholder pose adapter with on-device ML Kit Pose Detection.
+This release is focused on validating the experience without requiring a TV.
 
-Current capabilities:
+### Mirror Test
+- front camera by default
+- live mirrored preview
+- 33-point skeleton overlay
+- FPS, inference latency and calibration status
 
-- Android native / Kotlin
-- CameraX rear-camera capture
-- bundled local pose model
-- 33 body landmarks
-- live skeleton overlay
-- automatic body calibration
-- recalibration button
-- jump / crouch / lean / punch / kick events
-- live FPS and inference latency diagnostics
-- external display detection
-- separate phone diagnostics and TV game renderer
-- Goalkeeper reacts to the player's tracked body envelope
-- GitHub Actions debug APK build
+### Avatar Test
+- camera hidden
+- tracked body drives a stylized 2.5D robot
+- ML Kit Z landmarks influence limb scale and depth
+- works with front or rear camera
 
-No cloud backend is required for pose inference.
+### Play Mode
+- rear camera automatically selected
+- Goalkeeper fills the phone screen
+- tracked body controls the in-game body envelope
+
+### Camera switching
+A dedicated button switches FRONT / REAR at runtime.
 
 ## Runtime
 
-CameraX -> ML Kit Pose -> 33 landmarks -> BodyPose -> MotionEngine -> Goalkeeper -> USB-C/HDMI TV
+CameraX -> ML Kit Pose -> 33 landmarks -> MotionEngine -> Mirror / Avatar / Game
 
-## How to test
+Everything in the tracking path runs locally on the Android device.
 
-1. Install the latest Actions artifact.
-2. Put the phone in landscape.
-3. Stand far enough away to show shoulders, hips, knees and ankles.
-4. Wait for Calibration: READY.
-5. Connect USB-C/HDMI.
-6. Move left and right. The goalkeeper skeleton should follow you.
-7. Try reaching toward incoming balls.
-8. Use RECALIBRATE BODY if the neutral standing position changes.
+## Test order
 
-## V0.3 target
+1. Open Mirror.
+2. Confirm 25-33 tracked points.
+3. Move arms, crouch and lean.
+4. Open Avatar.
+5. Confirm the robot follows shoulders, elbows, wrists, hips, knees and ankles.
+6. Switch FRONT / REAR and compare stability.
+7. Open Play and test Goalkeeper on the phone.
 
-- person segmentation and body cutout
-- stronger collision geometry
-- camera/FOV calibration
-- game menu
-- Shadow Boxer
-- Body Ninja
+## Next target
+
+- temporal landmark smoothing
+- stronger body collision geometry
+- body segmentation / camera cutout
+- Body Ninja gameplay

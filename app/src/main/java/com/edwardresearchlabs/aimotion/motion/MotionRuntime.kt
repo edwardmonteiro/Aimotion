@@ -5,6 +5,7 @@ object MotionRuntime {
     @Volatile var events: Set<MotionEvent> = emptySet()
     @Volatile var calibrated: Boolean = false
     @Volatile var inferenceLatencyMs: Long = 0L
+    @Volatile var frontCamera: Boolean = true
 
     fun publish(
         newPose: BodyPose,
