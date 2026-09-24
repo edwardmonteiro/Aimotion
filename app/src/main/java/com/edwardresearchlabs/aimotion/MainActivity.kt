@@ -25,6 +25,7 @@ import com.edwardresearchlabs.aimotion.display.AvatarView
 import com.edwardresearchlabs.aimotion.display.GameView
 import com.edwardresearchlabs.aimotion.display.MotionPresentation
 import com.edwardresearchlabs.aimotion.display.PoseOverlay
+import com.edwardresearchlabs.aimotion.display.StickFightView
 import com.edwardresearchlabs.aimotion.motion.MotionEngine
 import com.edwardresearchlabs.aimotion.motion.MotionRuntime
 import com.edwardresearchlabs.aimotion.motion.PoseSmoother
@@ -33,17 +34,19 @@ import java.util.concurrent.Executors
 
 class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
 
-    private enum class TestMode { MIRROR, AVATAR, NINJA }
+    private enum class TestMode { MIRROR, AVATAR, NINJA, FIGHT }
 
     private lateinit var previewView: PreviewView
     private lateinit var poseOverlay: PoseOverlay
     private lateinit var avatarView: AvatarView
     private lateinit var gameView: GameView
+    private lateinit var fightView: StickFightView
     private lateinit var statusView: TextView
     private lateinit var modeView: TextView
     private lateinit var cameraButton: Button
     private lateinit var debugButton: Button
     private lateinit var displayManager: DisplayManager
+    private lateinit var controlPanel: LinearLayout
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private val motionEngine = MotionEngine()
@@ -104,7 +107,10 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         gameView = GameView(this)
         root.addView(gameView, fullScreenParams())
 
-        val panel = LinearLayout(this).apply {
+        fightView = StickFightView(this)
+        root.addView(fightView, fullScreenParams())
+
+        controlPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(22, 16, 22, 16)
             setBackgroundColor(0xB8000000.toInt())
@@ -130,6 +136,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         modeRow.addView(modeButton("MIRROR", TestMode.MIRROR))
         modeRow.addView(modeButton("AVATAR", TestMode.AVATAR))
         modeRow.addView(modeButton("NINJA", TestMode.NINJA))
+        modeRow.addView(modeButton("FIGHT", TestMode.FIGHT))
 
         cameraButton = Button(this).apply {
             text = "CAMERA: FRONT"
@@ -159,15 +166,15 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
             }
         }
 
-        panel.addView(title)
-        panel.addView(modeView)
-        panel.addView(statusView)
-        panel.addView(modeRow)
-        panel.addView(cameraButton)
-        panel.addView(debugButton)
-        panel.addView(calibrate)
+        controlPanel.addView(title)
+        controlPanel.addView(modeView)
+        controlPanel.addView(statusView)
+        controlPanel.addView(modeRow)
+        controlPanel.addView(cameraButton)
+        controlPanel.addView(debugButton)
+        controlPanel.addView(calibrate)
 
-        root.addView(panel, FrameLayout.LayoutParams(
+        root.addView(controlPanel, FrameLayout.LayoutParams(
             (resources.displayMetrics.density * 390).toInt(),
             ViewGroup.LayoutParams.WRAP_CONTENT,
             Gravity.TOP or Gravity.START
@@ -188,6 +195,10 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
                     useFrontCamera = false
                     MotionRuntime.frontCamera = false
                     gameView.resetGame()
+                } else if (mode == TestMode.FIGHT) {
+                    useFrontCamera = true
+                    MotionRuntime.frontCamera = true
+                    fightView.resetGame()
                 }
                 resetTracking()
                 applyMode()
@@ -213,17 +224,45 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         poseOverlay.mirrorX = mirror
         avatarView.mirrorX = mirror
 
-        previewView.visibility = if (currentMode == TestMode.MIRROR) View.VISIBLE else View.GONE
+        previewView.visibility = if (currentMode == TestMode.MIRROR || currentMode == TestMode.FIGHT) View.VISIBLE else View.GONE
         poseOverlay.visibility = if (currentMode == TestMode.MIRROR) View.VISIBLE else View.GONE
         avatarView.visibility = if (currentMode == TestMode.AVATAR) View.VISIBLE else View.GONE
         gameView.visibility = if (currentMode == TestMode.NINJA) View.VISIBLE else View.GONE
+        fightView.visibility = if (currentMode == TestMode.FIGHT) View.VISIBLE else View.GONE
         debugButton.visibility = if (currentMode == TestMode.NINJA) View.VISIBLE else View.GONE
+
+        if (currentMode == TestMode.FIGHT) {
+            val d = resources.displayMetrics.density
+            previewView.layoutParams = FrameLayout.LayoutParams(
+                (160 * d).toInt(),
+                (215 * d).toInt(),
+                Gravity.BOTTOM or Gravity.END
+            ).apply {
+                rightMargin = (18 * d).toInt()
+                bottomMargin = (22 * d).toInt()
+            }
+            fightView.bringToFront()
+            previewView.bringToFront()
+        } else {
+            previewView.layoutParams = fullScreenParams()
+            when (currentMode) {
+                TestMode.MIRROR -> {
+                    previewView.bringToFront()
+                    poseOverlay.bringToFront()
+                }
+                TestMode.AVATAR -> avatarView.bringToFront()
+                TestMode.NINJA -> gameView.bringToFront()
+                TestMode.FIGHT -> Unit
+            }
+        }
+        controlPanel.bringToFront()
 
         cameraButton.text = "CAMERA: ${if (useFrontCamera) "FRONT" else "REAR"}"
         modeView.text = when (currentMode) {
             TestMode.MIRROR -> "MIRROR  •  smoothed skeleton"
             TestMode.AVATAR -> "AVATAR  •  smoothed + predicted pose"
             TestMode.NINJA -> "FEEL UPDATE  •  capsules + velocity + perfect hits"
+            TestMode.FIGHT -> "STICK FIGHT  •  front camera + ragdoll combat"
         }
         updateStatus()
     }
@@ -301,8 +340,13 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         analyzer = newAnalyzer
         analysis.setAnalyzer(cameraExecutor, newAnalyzer)
 
-        if (currentMode == TestMode.MIRROR) {
+        if (currentMode == TestMode.MIRROR || currentMode == TestMode.FIGHT) {
             val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
+            if (currentMode == TestMode.FIGHT) {
+                previewView.scaleType = PreviewView.ScaleType.FILL_CENTER
+            } else {
+                previewView.scaleType = PreviewView.ScaleType.FIT_CENTER
+            }
             provider.bindToLifecycle(this, selector, preview, analysis)
         } else {
             provider.bindToLifecycle(this, selector, analysis)
