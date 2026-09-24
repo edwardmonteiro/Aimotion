@@ -11,6 +11,10 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.view.View
+import com.edwardresearchlabs.aimotion.ai.AdaptiveOpponentBrain
+import com.edwardresearchlabs.aimotion.ai.OpponentAction
+import com.edwardresearchlabs.aimotion.ai.OpponentFeatures
+import com.edwardresearchlabs.aimotion.ai.OpponentStyle
 import com.edwardresearchlabs.aimotion.motion.BodyPose
 import com.edwardresearchlabs.aimotion.motion.Joint
 import com.edwardresearchlabs.aimotion.motion.MotionEvent
@@ -36,7 +40,13 @@ class StickFightView(context: Context) : View(context) {
         var angularVelocity: Float = 0f,
         var attackCooldown: Float = 0.7f,
         var stunned: Float = 0f,
-        var corpseAge: Float = 0f
+        var corpseAge: Float = 0f,
+        val style: OpponentStyle = OpponentStyle.LEARNER,
+        val maxHp: Int = hp,
+        var action: OpponentAction = OpponentAction.WAIT,
+        var decisionCooldown: Float = 0f,
+        var actionTime: Float = 0f,
+        var guarding: Boolean = false
     )
 
     private data class Particle(
@@ -72,6 +82,7 @@ class StickFightView(context: Context) : View(context) {
     private val labels = mutableListOf<FloatLabel>()
     private val velocities = mutableMapOf<Joint, JointVelocity>()
     private val random = Random(73)
+    private val brain = AdaptiveOpponentBrain(441)
 
     private val vibrator: Vibrator? = if (android.os.Build.VERSION.SDK_INT >= 31) {
         val manager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
@@ -109,6 +120,7 @@ class StickFightView(context: Context) : View(context) {
         particles.clear()
         labels.clear()
         velocities.clear()
+        brain.reset()
         previousPose = null
         lastProcessedPoseTimestamp = -1L
         enemyId = 1L
@@ -139,6 +151,8 @@ class StickFightView(context: Context) : View(context) {
 
         if (pose != null && pose.timestampMs != lastProcessedPoseTimestamp) {
             updateJointVelocities(pose)
+            val playerGuarding = transform != null && isBlocking(pose, transform)
+            brain.observe(MotionRuntime.events, playerGuarding)
             processPlayerAttacks(pose, transform)
             previousPose = pose
             lastProcessedPoseTimestamp = pose.timestampMs
@@ -261,6 +275,15 @@ class StickFightView(context: Context) : View(context) {
 
         val enemy = target ?: return
         val power = speed.coerceIn(0.65f, 2.8f)
+
+        if (enemy.guarding && power < if (kick) 1.05f else 1.35f) {
+            val direction = if (enemy.x >= transform.centerX) 1f else -1f
+            enemy.vx += direction * 0.08f
+            enemy.stunned = 0.08f
+            labels += FloatLabel("AI BLOCK", enemy.x, enemy.y - 0.22f, 0.48f, false)
+            spawnImpact(enemy.x, enemy.y - 0.14f, direction, power * 0.45f)
+            return
+        }
         val relativeDirection = if (enemy.x >= transform.centerX) 1f else -1f
         val motionDirection = if (abs(v.vx) > 0.18f) {
             if (v.vx >= 0f) 1f else -1f
@@ -328,44 +351,123 @@ class StickFightView(context: Context) : View(context) {
         val dodging = events.contains(MotionEvent.CROUCH) ||
             events.contains(MotionEvent.LEAN_LEFT) ||
             events.contains(MotionEvent.LEAN_RIGHT)
+        val playerAttacking = events.any {
+            it == MotionEvent.LEFT_PUNCH ||
+                it == MotionEvent.RIGHT_PUNCH ||
+                it == MotionEvent.LEFT_KICK ||
+                it == MotionEvent.RIGHT_KICK
+        }
 
         val iterator = enemies.iterator()
         while (iterator.hasNext()) {
             val enemy = iterator.next()
             enemy.stunned = (enemy.stunned - dt).coerceAtLeast(0f)
             enemy.attackCooldown -= dt
+            enemy.decisionCooldown -= dt
+            enemy.actionTime += dt
 
             if (enemy.alive) {
+                val dx = playerX - enemy.x
+                val distance = abs(dx)
+
+                if (enemy.decisionCooldown <= 0f && enemy.stunned <= 0f) {
+                    enemy.action = brain.choose(
+                        enemy.style,
+                        OpponentFeatures(
+                            distance = distance,
+                            playerAttacking = playerAttacking,
+                            playerGuarding = blocking,
+                            enemyHealthRatio = (enemy.hp.toFloat() / enemy.maxHp.coerceAtLeast(1)).coerceIn(0f, 1f),
+                            attackReady = enemy.attackCooldown <= 0f,
+                            wave = wave
+                        )
+                    )
+                    enemy.actionTime = 0f
+                    enemy.guarding = enemy.action == OpponentAction.GUARD
+                    enemy.decisionCooldown = when (enemy.style) {
+                        OpponentStyle.BRUTE -> 0.18f
+                        OpponentStyle.COUNTER -> 0.13f
+                        OpponentStyle.LEARNER -> 0.15f
+                    } + random.nextFloat() * 0.05f
+                }
+
                 if (enemy.stunned <= 0f) {
-                    val dx = playerX - enemy.x
-                    val distance = abs(dx)
-                    if (distance > 0.105f) {
-                        val moveSpeed = (0.052f + wave * 0.0045f).coerceAtMost(0.085f)
-                        enemy.vx += if (dx > 0f) moveSpeed * dt * 7f else -moveSpeed * dt * 7f
-                    } else if (enemy.attackCooldown <= 0f) {
-                        enemy.attackCooldown = (1.18f - wave * 0.035f).coerceAtLeast(0.72f)
-                        when {
-                            blocking -> {
-                                score += 12
-                                combo++
-                                bestCombo = max(bestCombo, combo)
-                                enemy.vx += if (enemy.x < playerX) -0.16f else 0.16f
-                                enemy.stunned = 0.24f
-                                labels += FloatLabel("BLOCK +12", playerX, 0.42f, 0.55f, false)
+                    when (enemy.action) {
+                        OpponentAction.ADVANCE -> {
+                            val moveSpeed = (0.060f + wave * 0.0045f).coerceAtMost(0.092f)
+                            enemy.vx += if (dx > 0f) moveSpeed * dt * 7f else -moveSpeed * dt * 7f
+                        }
+
+                        OpponentAction.RETREAT -> {
+                            val retreat = 0.078f
+                            enemy.vx += if (dx > 0f) -retreat * dt * 7f else retreat * dt * 7f
+                        }
+
+                        OpponentAction.DODGE -> {
+                            if (enemy.actionTime < 0.18f) {
+                                val dodge = 0.17f
+                                enemy.vx += if (dx > 0f) -dodge * dt * 10f else dodge * dt * 10f
                             }
-                            dodging -> {
-                                score += 20
-                                labels += FloatLabel("DODGE +20", playerX, 0.42f, 0.55f, false)
+                        }
+
+                        OpponentAction.GUARD -> {
+                            enemy.vx *= 0.78f
+                        }
+
+                        OpponentAction.JAB,
+                        OpponentAction.HEAVY,
+                        OpponentAction.COUNTER -> {
+                            if (distance > 0.115f) {
+                                val closeSpeed = if (enemy.action == OpponentAction.HEAVY) 0.070f else 0.055f
+                                enemy.vx += if (dx > 0f) closeSpeed * dt * 7f else -closeSpeed * dt * 7f
+                            } else if (enemy.attackCooldown <= 0f) {
+                                val counterBonus = enemy.action == OpponentAction.COUNTER && playerAttacking
+                                val heavy = enemy.action == OpponentAction.HEAVY
+                                enemy.attackCooldown = when {
+                                    heavy -> 1.18f
+                                    counterBonus -> 0.72f
+                                    else -> 0.90f
+                                }
+
+                                when {
+                                    blocking -> {
+                                        score += 12
+                                        combo++
+                                        bestCombo = max(bestCombo, combo)
+                                        enemy.vx += if (enemy.x < playerX) -0.16f else 0.16f
+                                        enemy.stunned = if (heavy) 0.12f else 0.22f
+                                        labels += FloatLabel("BLOCK +12", playerX, 0.42f, 0.55f, false)
+                                    }
+
+                                    dodging -> {
+                                        score += 20
+                                        labels += FloatLabel("DODGE +20", playerX, 0.42f, 0.55f, false)
+                                    }
+
+                                    else -> {
+                                        val damage = if (heavy && random.nextFloat() < 0.34f) 2 else 1
+                                        health = (health - damage).coerceAtLeast(0)
+                                        combo = 0
+                                        labels += FloatLabel(
+                                            if (counterBonus) "COUNTER!" else if (heavy) "HEAVY HIT!" else "HIT!",
+                                            playerX,
+                                            0.43f,
+                                            0.65f,
+                                            true
+                                        )
+                                        shakeUntilNs = System.nanoTime() + if (heavy) 190_000_000L else 145_000_000L
+                                        shakeStrength = if (heavy) 13f else 9f
+                                        vibrate(if (heavy) 72 else 48)
+                                        enemy.vx += if (enemy.x < playerX) -0.10f else 0.10f
+                                        enemy.stunned = 0.16f
+                                    }
+                                }
                             }
-                            else -> {
-                                health = (health - 1).coerceAtLeast(0)
-                                combo = 0
-                                labels += FloatLabel("HIT!", playerX, 0.43f, 0.65f, true)
-                                shakeUntilNs = System.nanoTime() + 150_000_000L
-                                shakeStrength = 10f
-                                vibrate(55)
-                                enemy.vx += if (enemy.x < playerX) -0.10f else 0.10f
-                                enemy.stunned = 0.18f
+                        }
+
+                        OpponentAction.WAIT -> {
+                            if (distance > 0.22f) {
+                                enemy.vx += if (dx > 0f) 0.025f * dt * 7f else -0.025f * dt * 7f
                             }
                         }
                     }
@@ -441,12 +543,20 @@ class StickFightView(context: Context) : View(context) {
 
     private fun spawnEnemy() {
         val side = if ((spawnedThisWave + wave) % 2 == 0) -1 else 1
+        val style = when ((spawnedThisWave + wave) % 3) {
+            0 -> OpponentStyle.BRUTE
+            1 -> OpponentStyle.COUNTER
+            else -> OpponentStyle.LEARNER
+        }
+        val hp = if (wave >= 4 && spawnedThisWave % 3 == 2) 3 else 2
         enemies += Enemy(
             id = enemyId++,
             x = if (side < 0) 0.06f else 0.94f,
             y = 0.835f,
             side = side,
-            hp = if (wave >= 4 && spawnedThisWave % 3 == 2) 3 else 2,
+            hp = hp,
+            style = style,
+            maxHp = hp,
             attackCooldown = 0.45f + random.nextFloat() * 0.55f
         )
     }
@@ -624,7 +734,11 @@ class StickFightView(context: Context) : View(context) {
         val neckY = headY + bodyH * 0.24f
         val hipY = feetY - bodyH * 0.40f
         val facing = if (enemy.side < 0) 1f else -1f
-        val bodyColor = if (enemy.hp >= 3) 0xFFF4B860.toInt() else 0xFFFF6B7A.toInt()
+        val bodyColor = when (enemy.style) {
+            OpponentStyle.BRUTE -> 0xFFF4B860.toInt()
+            OpponentStyle.COUNTER -> 0xFFA78BFA.toInt()
+            OpponentStyle.LEARNER -> 0xFFFF6B7A.toInt()
+        }
 
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = max(4f, h * 0.009f)
@@ -684,7 +798,7 @@ class StickFightView(context: Context) : View(context) {
         paint.typeface = Typeface.DEFAULT_BOLD
         paint.textSize = h * 0.026f
         paint.color = 0xFFF8FAFC.toInt()
-        canvas.drawText("STICK FIGHT", w * 0.64f, h * 0.072f, paint)
+        canvas.drawText("STICK FIGHT • SMART AI", w * 0.64f, h * 0.072f, paint)
 
         for (i in 0 until 5) {
             paint.style = Paint.Style.FILL
@@ -695,7 +809,7 @@ class StickFightView(context: Context) : View(context) {
         paint.typeface = Typeface.DEFAULT
         paint.textSize = h * 0.018f
         paint.color = 0xFF748394.toInt()
-        canvas.drawText("BEST COMBO $bestCombo", w * 0.64f, h * 0.145f, paint)
+        canvas.drawText("BEST $bestCombo  •  ${brain.profile().dominantPattern()}", w * 0.64f, h * 0.145f, paint)
 
         paint.textSize = h * 0.019f
         paint.color = 0xFF94A3B8.toInt()
