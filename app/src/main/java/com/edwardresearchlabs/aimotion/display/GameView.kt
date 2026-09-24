@@ -6,6 +6,9 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.view.View
 import com.edwardresearchlabs.aimotion.game.GoalkeeperGame
+import com.edwardresearchlabs.aimotion.motion.BodyPose
+import com.edwardresearchlabs.aimotion.motion.Joint
+import com.edwardresearchlabs.aimotion.motion.MotionRuntime
 
 class GameView(context: Context) : View(context) {
     private val game = GoalkeeperGame()
@@ -18,9 +21,13 @@ class GameView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+
         val now = System.nanoTime()
         val dt = ((now - lastFrame) / 1_000_000_000f).coerceAtMost(0.05f)
         lastFrame = now
+
+        val pose = MotionRuntime.pose
+        game.updatePose(pose)
         game.tick(dt)
 
         val w = width.toFloat()
@@ -29,24 +36,50 @@ class GameView(context: Context) : View(context) {
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = h * 0.008f
         paint.color = 0xFF444444.toInt()
-        canvas.drawRect(RectF(w * 0.12f, h * 0.12f, w * 0.88f, h * 0.92f), paint)
+        canvas.drawRect(RectF(w * 0.08f, h * 0.12f, w * 0.92f, h * 0.93f), paint)
 
         val s = game.state
         paint.style = Paint.Style.FILL
         paint.color = 0xFFFFFFFF.toInt()
-        canvas.drawCircle(s.ballX * w, s.ballY * h, h * 0.035f, paint)
+        canvas.drawCircle(s.ballX * w, s.ballY * h, h * 0.032f, paint)
 
-        paint.color = 0xFFBDBDBD.toInt()
-        canvas.drawCircle(s.playerX * w, h * 0.70f, h * 0.055f, paint)
-        paint.strokeWidth = h * 0.025f
-        canvas.drawLine(s.playerX * w, h * 0.74f, s.playerX * w, h * 0.87f, paint)
-        canvas.drawLine(s.playerX * w, h * 0.77f, (s.playerX - 0.08f) * w, h * 0.82f, paint)
-        canvas.drawLine(s.playerX * w, h * 0.77f, (s.playerX + 0.08f) * w, h * 0.82f, paint)
+        if (pose != null) drawPose(canvas, pose, w, h)
 
-        paint.textSize = h * 0.045f
+        paint.textSize = h * 0.042f
         paint.color = 0xFFFFFFFF.toInt()
-        canvas.drawText("AI MOTION  •  GOALKEEPER  •  ${s.score}/${s.shots}", w * 0.04f, h * 0.08f, paint)
+        canvas.drawText("AI MOTION  •  GOALKEEPER  •  ${s.score}/${s.shots}", w * 0.04f, h * 0.07f, paint)
+
+        paint.textSize = h * 0.026f
+        paint.color = 0xFFAAAAAA.toInt()
+        val tracking = if (pose != null) "BODY TRACKED" else "STEP INTO CAMERA"
+        canvas.drawText(tracking, w * 0.04f, h * 0.11f, paint)
 
         postInvalidateOnAnimation()
+    }
+
+    private fun drawPose(canvas: Canvas, pose: BodyPose, w: Float, h: Float) {
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = h * 0.012f
+        paint.color = 0xFFE0E0E0.toInt()
+
+        for ((a, b) in PoseOverlay.bones) {
+            val pa = pose[a] ?: continue
+            val pb = pose[b] ?: continue
+            if (pa.confidence < 0.45f || pb.confidence < 0.45f) continue
+            canvas.drawLine((1f - pa.x) * w, pa.y * h, (1f - pb.x) * w, pb.y * h, paint)
+        }
+
+        paint.style = Paint.Style.FILL
+        for (joint in listOf(
+            Joint.LEFT_WRIST, Joint.RIGHT_WRIST,
+            Joint.LEFT_SHOULDER, Joint.RIGHT_SHOULDER,
+            Joint.LEFT_HIP, Joint.RIGHT_HIP,
+            Joint.LEFT_KNEE, Joint.RIGHT_KNEE,
+            Joint.LEFT_ANKLE, Joint.RIGHT_ANKLE
+        )) {
+            val p = pose[joint] ?: continue
+            if (p.confidence < 0.45f) continue
+            canvas.drawCircle((1f - p.x) * w, p.y * h, h * 0.014f, paint)
+        }
     }
 }
