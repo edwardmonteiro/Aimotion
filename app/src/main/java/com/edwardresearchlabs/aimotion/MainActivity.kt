@@ -46,6 +46,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
     private lateinit var cameraButton: Button
     private lateinit var debugButton: Button
     private lateinit var displayManager: DisplayManager
+    private lateinit var controlPanel: LinearLayout
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private val motionEngine = MotionEngine()
@@ -109,7 +110,7 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         fightView = StickFightView(this)
         root.addView(fightView, fullScreenParams())
 
-        val panel = LinearLayout(this).apply {
+        controlPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(22, 16, 22, 16)
             setBackgroundColor(0xB8000000.toInt())
@@ -165,15 +166,15 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
             }
         }
 
-        panel.addView(title)
-        panel.addView(modeView)
-        panel.addView(statusView)
-        panel.addView(modeRow)
-        panel.addView(cameraButton)
-        panel.addView(debugButton)
-        panel.addView(calibrate)
+        controlPanel.addView(title)
+        controlPanel.addView(modeView)
+        controlPanel.addView(statusView)
+        controlPanel.addView(modeRow)
+        controlPanel.addView(cameraButton)
+        controlPanel.addView(debugButton)
+        controlPanel.addView(calibrate)
 
-        root.addView(panel, FrameLayout.LayoutParams(
+        root.addView(controlPanel, FrameLayout.LayoutParams(
             (resources.displayMetrics.density * 390).toInt(),
             ViewGroup.LayoutParams.WRAP_CONTENT,
             Gravity.TOP or Gravity.START
@@ -229,6 +230,32 @@ class MainActivity : ComponentActivity(), DisplayManager.DisplayListener {
         gameView.visibility = if (currentMode == TestMode.NINJA) View.VISIBLE else View.GONE
         fightView.visibility = if (currentMode == TestMode.FIGHT) View.VISIBLE else View.GONE
         debugButton.visibility = if (currentMode == TestMode.NINJA) View.VISIBLE else View.GONE
+
+        if (currentMode == TestMode.FIGHT) {
+            val d = resources.displayMetrics.density
+            previewView.layoutParams = FrameLayout.LayoutParams(
+                (160 * d).toInt(),
+                (215 * d).toInt(),
+                Gravity.BOTTOM or Gravity.END
+            ).apply {
+                rightMargin = (18 * d).toInt()
+                bottomMargin = (22 * d).toInt()
+            }
+            fightView.bringToFront()
+            previewView.bringToFront()
+        } else {
+            previewView.layoutParams = fullScreenParams()
+            when (currentMode) {
+                TestMode.MIRROR -> {
+                    previewView.bringToFront()
+                    poseOverlay.bringToFront()
+                }
+                TestMode.AVATAR -> avatarView.bringToFront()
+                TestMode.NINJA -> gameView.bringToFront()
+                TestMode.FIGHT -> Unit
+            }
+        }
+        controlPanel.bringToFront()
 
         cameraButton.text = "CAMERA: ${if (useFrontCamera) "FRONT" else "REAR"}"
         modeView.text = when (currentMode) {
