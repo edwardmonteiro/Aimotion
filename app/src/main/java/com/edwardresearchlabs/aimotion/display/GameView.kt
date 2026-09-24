@@ -53,7 +53,7 @@ class GameView(context: Context) : View(context) {
     private val labels = mutableListOf<FloatLabel>()
     private val random = Random(7)
 
-    private val tone = ToneGenerator(AudioManager.STREAM_MUSIC, 55)
+    private val tone: ToneGenerator? = runCatching { ToneGenerator(AudioManager.STREAM_MUSIC, 55) }.getOrNull()
     private val vibrator: Vibrator? = if (android.os.Build.VERSION.SDK_INT >= 31) {
         val manager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
         manager.defaultVibrator
@@ -90,7 +90,7 @@ class GameView(context: Context) : View(context) {
     }
 
     override fun onDetachedFromWindow() {
-        tone.release()
+        runCatching { tone?.release() }
         super.onDetachedFromWindow()
     }
 
@@ -137,31 +137,47 @@ class GameView(context: Context) : View(context) {
 
         if (hit.points > 0) {
             if (hit.perfect) {
-                tone.startTone(ToneGenerator.TONE_PROP_ACK, 70)
+                safeTone(ToneGenerator.TONE_PROP_ACK, 70)
                 slowUntilNs = System.nanoTime() + 95_000_000L
                 shakeUntilNs = System.nanoTime() + 120_000_000L
                 shakeStrengthPx = 8f
                 vibrate(32)
             } else {
-                tone.startTone(ToneGenerator.TONE_PROP_BEEP, 45)
+                safeTone(ToneGenerator.TONE_PROP_BEEP, 45)
                 shakeUntilNs = System.nanoTime() + 70_000_000L
                 shakeStrengthPx = 3.5f
                 vibrate(16)
             }
         } else {
-            tone.startTone(ToneGenerator.TONE_PROP_NACK, 70)
+            safeTone(ToneGenerator.TONE_PROP_NACK, 70)
             shakeUntilNs = System.nanoTime() + 150_000_000L
             shakeStrengthPx = 10f
             vibrate(45)
         }
     }
 
+    private fun safeTone(toneType: Int, durationMs: Int) {
+        runCatching {
+            tone?.startTone(toneType, durationMs)
+        }
+    }
+
     private fun vibrate(ms: Long) {
-        if (android.os.Build.VERSION.SDK_INT >= 26) {
-            vibrator?.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator?.vibrate(ms)
+        runCatching {
+            val deviceVibrator = vibrator ?: return@runCatching
+            if (!deviceVibrator.hasVibrator()) return@runCatching
+
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                deviceVibrator.vibrate(
+                    VibrationEffect.createOneShot(
+                        ms,
+                        VibrationEffect.DEFAULT_AMPLITUDE
+                    )
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                deviceVibrator.vibrate(ms)
+            }
         }
     }
 

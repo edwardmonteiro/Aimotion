@@ -2,36 +2,25 @@
 
 **Your body is the controller.**
 
-## V0.5 — Feel Update
+## V0.5.1 — Hit crash hotfix
 
-This release focuses on control quality rather than adding more games.
+V0.5.1 fixes a runtime crash triggered by the first in-game impact.
 
-### Tracking
-- adaptive temporal smoothing
-- short motion prediction for fast limbs
-- brief recovery of missing landmarks
+### Root cause
+V0.5 introduced haptic feedback but the Android manifest did not declare the VIBRATE permission.
 
-### Physics
-- arm and leg capsule collision
-- velocity-aware impacts
-- PERFECT hits for fast, clean strikes
+### Fixes
+- declares android.permission.VIBRATE
+- haptic feedback is guarded and cannot crash gameplay
+- ToneGenerator feedback is guarded and optional
+- the game remains playable even if sound or vibration fails on a device
 
-### Game feel
-- audio feedback
-- haptic feedback
-- screen shake
-- short slow-motion on perfect hits
-- stronger particles
-- progressive levels
-
-### Metrics
-- accuracy
-- reaction time
+V0.5 features remain unchanged:
+- adaptive pose smoothing
+- short prediction
+- capsule collisions
+- velocity-based impacts
 - perfect hits
-- best combo
-- level
-
-### Debug
-- PHYSICS toggle draws the active limb collision segments
-
-The goal of V0.5 is simple: movement should feel connected, responsive and intentional.
+- progressive levels
+- accuracy and reaction metrics
+- physics debug overlay
