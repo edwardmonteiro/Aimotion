@@ -54,7 +54,7 @@ class SplitActivity : ComponentActivity() {
         }
 
         previewView = PreviewView(this).apply {
-            scaleType = PreviewView.ScaleType.FIT_CENTER
+            scaleType = PreviewView.ScaleType.FILL_CENTER
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         }
 
