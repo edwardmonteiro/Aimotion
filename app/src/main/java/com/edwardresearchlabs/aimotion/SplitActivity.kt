@@ -6,8 +6,6 @@ import android.graphics.Color
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
-import android.view.WindowInsets
-import android.view.WindowInsetsController
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.view.Gravity
@@ -49,7 +47,6 @@ class SplitActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         try {
-            hideSystemUi()
             MotionRuntime.frontCamera = true
 
         val root = FrameLayout(this).apply {
@@ -80,6 +77,7 @@ class SplitActivity : ComponentActivity() {
         )
 
         setContentView(root)
+        root.post { hideSystemUi() }
 
             if (
                 ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
@@ -100,13 +98,7 @@ class SplitActivity : ComponentActivity() {
     }
 
     private fun hideSystemUi() {
-        if (android.os.Build.VERSION.SDK_INT >= 30) {
-            window.insetsController?.let { controller ->
-                controller.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
-                controller.systemBarsBehavior =
-                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
-        } else {
+        runCatching {
             @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility =
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
