@@ -583,40 +583,46 @@ class GameView(context: Context) : View(context) {
     private fun drawHud(canvas: Canvas, w: Float, h: Float, tracking: Boolean) {
         val state = game.state
 
-        paint.style = Paint.Style.FILL
-        paint.color = 0xA60A0F18.toInt()
-        canvas.drawRoundRect(RectF(w*0.035f,h*0.035f,w*0.46f,h*0.175f), h*0.026f,h*0.026f,paint)
-
-        paint.color = 0xFFFFFFFF.toInt()
         paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
-        paint.textSize = h * 0.040f
-        canvas.drawText("BODY NINJA  •  LV ${state.level}", w*0.055f,h*0.082f,paint)
+        paint.textAlign = Paint.Align.LEFT
+        paint.color = 0xE6FFFFFF.toInt()
+        paint.textSize = h * 0.034f
+        canvas.drawText("LV ${state.level}", w * 0.035f, h * 0.065f, paint)
 
         paint.typeface = android.graphics.Typeface.DEFAULT
         paint.textSize = h * 0.022f
-        paint.color = 0xFF94A3B8.toInt()
+        paint.color = if (tracking) 0xFF86EFAC.toInt() else 0xFFFF8A8A.toInt()
         canvas.drawText(
-            if (tracking) "ACC ${state.accuracyPercent}%  •  REACT ${state.averageReactionMs}ms  •  PERFECT ${state.perfectHits}"
-            else "STEP INTO CAMERA",
-            w*0.055f,h*0.122f,paint
+            if (tracking) "● LIVE" else "● TRACKING",
+            w * 0.035f,
+            h * 0.100f,
+            paint
         )
 
         paint.textAlign = Paint.Align.RIGHT
         paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
-        paint.textSize = h * 0.052f
+        paint.textSize = h * 0.050f
         paint.color = 0xFFFFFFFF.toInt()
-        canvas.drawText(state.score.toString(), w*0.94f,h*0.082f,paint)
+        canvas.drawText(state.score.toString(), w * 0.965f, h * 0.068f, paint)
 
         paint.typeface = android.graphics.Typeface.DEFAULT
-        paint.textSize = h * 0.026f
+        paint.textSize = h * 0.023f
         paint.color = 0xFF67E8F9.toInt()
-        canvas.drawText("COMBO x${state.combo}", w*0.94f,h*0.123f,paint)
+        canvas.drawText("COMBO x${state.combo}", w * 0.965f, h * 0.105f, paint)
 
         paint.textAlign = Paint.Align.LEFT
         for (i in 0 until 3) {
             paint.style = Paint.Style.FILL
-            paint.color = if (i < state.lives) 0xFFFF496C.toInt() else 0xFF253047.toInt()
-            canvas.drawCircle(w*0.055f + i*h*0.034f, h*0.158f, h*0.010f, paint)
+            paint.color = if (i < state.lives) 0xFFFF496C.toInt() else 0x55253047
+            canvas.drawCircle(
+                w * 0.035f + i * h * 0.030f,
+                h * 0.135f,
+                h * 0.008f,
+                paint
+            )
         }
+
+        paint.typeface = android.graphics.Typeface.DEFAULT
     }
+
 }

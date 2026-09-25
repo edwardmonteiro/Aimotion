@@ -1,33 +1,34 @@
 # AI Motion
 
-## V0.6 — REAL ME
+## V0.6.1 — Clean Game UI
 
-REAL ME puts the player's actual segmented camera image inside Body Ninja while keeping pose tracking as the physics controller.
+This release removes the debug-dashboard feel from normal gameplay.
 
-### Pipeline
+### Default experience
+- app opens directly in REAL ME
+- rear camera is selected automatically
+- game fills the screen
+- only a small ⋯ control remains visible
 
-CameraX
-→ ML Kit Pose (every analyzed frame)
-→ Pose smoothing + prediction
-→ Body physics
-→ ML Kit Selfie Segmentation (throttled)
-→ transparent player cutout
-→ arena compositing
+### HUD
+The Body Ninja HUD is reduced to:
+- level
+- live tracking indicator
+- score
+- combo
+- lives
 
-### REAL ME
+Detailed accuracy, reaction, segmentation and camera diagnostics move into Developer Controls.
 
-- local-only person segmentation
-- actual camera pixels, not a generated avatar
-- transparent background
-- player cutout follows the same viewport mapping as collision physics
-- hand and foot energy glow
-- existing trails, hit particles, sound, haptics and perfect-hit feedback
+### Developer Controls
+Tap ⋯ to reveal:
+- REAL ME
+- NINJA
+- MIRROR
+- AVATAR
+- front/rear camera
+- physics overlay
+- recalibrate
+- FPS / pose / segmentation diagnostics
 
-### Performance choices
-
-Selfie segmentation is bundled on-device. To protect gameplay responsiveness:
-- segmentation runs every second analyzed frame
-- segmentation input is capped at a 480 px long edge
-- pose tracking continues independently
-
-The game remains functional while the segmentation frame is warming up; it falls back to the skeleton controller if a fresh cutout is unavailable.
+Close the panel to return to the clean game view.
