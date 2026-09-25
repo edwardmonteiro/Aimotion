@@ -288,25 +288,25 @@ class StickFightView(context: Context) : View(context) {
                 lastPlayerAttackNs = nowNs
                 playerAction = PlayerAction.PUNCH
                 playerActionUntilNs = nowNs + 190_000_000L
-                hitCanonical(jointSpeeds[Joint.RIGHT_WRIST]?.speed ?: 0.8f, false)
+                hitCanonical(velocities[Joint.RIGHT_WRIST]?.speed ?: 0.8f, false)
             }
             events.contains(MotionEvent.LEFT_PUNCH) -> {
                 lastPlayerAttackNs = nowNs
                 playerAction = PlayerAction.PUNCH
                 playerActionUntilNs = nowNs + 190_000_000L
-                hitCanonical(jointSpeeds[Joint.LEFT_WRIST]?.speed ?: 0.8f, false)
+                hitCanonical(velocities[Joint.LEFT_WRIST]?.speed ?: 0.8f, false)
             }
             events.contains(MotionEvent.RIGHT_KICK) -> {
                 lastPlayerAttackNs = nowNs
                 playerAction = PlayerAction.KICK
                 playerActionUntilNs = nowNs + 230_000_000L
-                hitCanonical(jointSpeeds[Joint.RIGHT_ANKLE]?.speed ?: 0.7f, true)
+                hitCanonical(velocities[Joint.RIGHT_ANKLE]?.speed ?: 0.7f, true)
             }
             events.contains(MotionEvent.LEFT_KICK) -> {
                 lastPlayerAttackNs = nowNs
                 playerAction = PlayerAction.KICK
                 playerActionUntilNs = nowNs + 230_000_000L
-                hitCanonical(jointSpeeds[Joint.LEFT_ANKLE]?.speed ?: 0.7f, true)
+                hitCanonical(velocities[Joint.LEFT_ANKLE]?.speed ?: 0.7f, true)
             }
         }
     }
