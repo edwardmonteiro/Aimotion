@@ -8,7 +8,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsController
-import android.widget.FrameLayout
+import android.widget.FrameLayout\nimport android.widget.TextView\nimport android.view.Gravity
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -45,9 +45,10 @@ class SplitActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        hideSystemUi()
 
-        MotionRuntime.frontCamera = true
+        try {
+            hideSystemUi()
+            MotionRuntime.frontCamera = true
 
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -78,13 +79,16 @@ class SplitActivity : ComponentActivity() {
 
         setContentView(root)
 
-        if (
-            ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            startCamera()
-        } else {
-            cameraPermission.launch(Manifest.permission.CAMERA)
+            if (
+                ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                startCamera()
+            } else {
+                cameraPermission.launch(Manifest.permission.CAMERA)
+            }
+        } catch (t: Throwable) {
+            showFatal("BOOT", t)
         }
     }
 
@@ -113,15 +117,24 @@ class SplitActivity : ComponentActivity() {
     }
 
     private fun startCamera() {
-        val future = ProcessCameraProvider.getInstance(this)
-        future.addListener({
-            cameraProvider = future.get()
-            bindCamera()
-        }, ContextCompat.getMainExecutor(this))
+        runCatching {
+            val future = ProcessCameraProvider.getInstance(this)
+            future.addListener({
+                runCatching {
+                    cameraProvider = future.get()
+                    bindCamera()
+                }.onFailure {
+                    showFatal("CAMERA PROVIDER", it)
+                }
+            }, ContextCompat.getMainExecutor(this))
+        }.onFailure {
+            showFatal("CAMERA START", it)
+        }
     }
 
     private fun bindCamera() {
-        val provider = cameraProvider ?: return
+        try {
+            val provider = cameraProvider ?: return
         val generation = ++bindGeneration
 
         provider.unbindAll()
@@ -182,7 +195,40 @@ class SplitActivity : ComponentActivity() {
         analyzer = nextAnalyzer
         analysis.setAnalyzer(cameraExecutor, nextAnalyzer)
 
-        provider.bindToLifecycle(this, selector, preview, analysis)
+            provider.bindToLifecycle(this, selector, preview, analysis)
+        } catch (t: Throwable) {
+            if (::gameView.isInitialized) {
+                gameView.setCameraError("CAMERA " + t.javaClass.simpleName)
+            } else {
+                showFatal("CAMERA BIND", t)
+            }
+        }
+    }
+
+    private fun showFatal(stage: String, t: Throwable) {
+        runOnUiThread {
+            val message = buildString {
+                appendLine("SPLIT")
+                appendLine()
+                appendLine("STARTUP ERROR")
+                appendLine(stage)
+                appendLine(t.javaClass.simpleName)
+                appendLine(t.message ?: "No message")
+                appendLine()
+                append("Take a screenshot of this screen.")
+            }
+
+            val text = TextView(this).apply {
+                setBackgroundColor(Color.BLACK)
+                setTextColor(Color.WHITE)
+                textSize = 18f
+                gravity = Gravity.CENTER
+                setPadding(48, 48, 48, 48)
+                this.text = message
+            }
+
+            setContentView(text)
+        }
     }
 
     override fun onDestroy() {
