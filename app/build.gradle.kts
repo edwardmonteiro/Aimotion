@@ -10,8 +10,8 @@ android {
         applicationId = "com.edwardresearchlabs.split"
         minSdk = 29
         targetSdk = 37
-        versionCode = 5
-        versionName = "0.3.0"
+        versionCode = 6
+        versionName = "0.4.0"
     }
 
     compileOptions {
@@ -27,5 +27,5 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.6.2")
     implementation("androidx.camera:camera-view:1.6.2")
     implementation("com.google.mlkit:pose-detection:18.0.0-beta5")
-    implementation("com.google.mlkit:segmentation-selfie:16.0.0-beta6")
+    implementation("com.google.mlkit:segmentation-selfie:16.0.0-beta6")\n    implementation("com.google.android.filament:filament-utils-android:1.76.1")
 }
