@@ -290,7 +290,7 @@ class SplitGameView(context: Context) : View(context) {
                 if (pose != null) {
                     val center = bodyCenterX(pose)
                     val delta = center - escapeStartCenter
-                    val movedEnough = if (trapSide < 0) delta > 0.115f else delta < -0.115f
+                    val movedEnough = if (trapSide < 0) delta > 0.082f else delta < -0.082f
 
                     if (movedEnough) {
                         score += 40 + min(combo * 2, 28)
@@ -314,7 +314,7 @@ class SplitGameView(context: Context) : View(context) {
             Stage.RECOVER -> {
                 if (pose != null) {
                     val center = bodyCenterX(pose)
-                    if (abs(center - 0.5f) < 0.085f) {
+                    if (abs(center - 0.5f) < 0.095f) {
                         score += 18
                         combo++
                         showFeedback("CENTER", 350L)
@@ -489,16 +489,16 @@ class SplitGameView(context: Context) : View(context) {
     private fun drawCourt(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
-        val horizon = h * 0.72f
-        val bottom = h * 0.98f
+        val horizon = h * 0.62f
+        val bottom = h * 0.96f
 
         paint.style = Paint.Style.FILL
         paint.color = 0x24000000
         path.reset()
-        path.moveTo(w * 0.18f, horizon)
-        path.lineTo(w * 0.82f, horizon)
-        path.lineTo(w * 0.98f, bottom)
-        path.lineTo(w * 0.02f, bottom)
+        path.moveTo(w * 0.26f, horizon)
+        path.lineTo(w * 0.74f, horizon)
+        path.lineTo(w * 0.96f, bottom)
+        path.lineTo(w * 0.04f, bottom)
         path.close()
         canvas.drawPath(path, paint)
 
@@ -511,9 +511,9 @@ class SplitGameView(context: Context) : View(context) {
             val t = i / 3f
             val y = horizon + (bottom - horizon) * t * t
             canvas.drawLine(
-                w * (0.18f - 0.16f * t),
+                w * (0.26f - 0.22f * t),
                 y,
-                w * (0.82f + 0.16f * t),
+                w * (0.74f + 0.22f * t),
                 y,
                 paint
             )
@@ -536,8 +536,8 @@ class SplitGameView(context: Context) : View(context) {
 
         val angle = ropePhase * (2.0 * PI)
         val swing = ((1.0 - cos(angle)) * 0.5).toFloat()
-        val topY = h * 0.15f
-        val floorY = h * 0.89f
+        val topY = h * 0.34f
+        val floorY = h * 0.84f
         val ropeY = topY + swing * (floorY - topY)
         val danger = ropePhase >= 0.58f || ropePhase <= 0.06f
 
@@ -548,11 +548,11 @@ class SplitGameView(context: Context) : View(context) {
         paint.maskFilter = BlurMaskFilter(h * 0.005f, BlurMaskFilter.Blur.NORMAL)
 
         path.reset()
-        path.moveTo(w * 0.08f, ropeY)
+        path.moveTo(w * 0.12f, ropeY)
         path.cubicTo(
-            w * 0.30f, ropeY + h * 0.04f,
-            w * 0.70f, ropeY + h * 0.04f,
-            w * 0.92f, ropeY
+            w * 0.30f, ropeY + h * 0.022f,
+            w * 0.70f, ropeY + h * 0.022f,
+            w * 0.88f, ropeY
         )
         canvas.drawPath(path, paint)
         paint.maskFilter = null
@@ -560,17 +560,17 @@ class SplitGameView(context: Context) : View(context) {
         paint.style = Paint.Style.FILL
         paint.color = 0xE8FFFFFF.toInt()
         canvas.drawRoundRect(
-            RectF(w * 0.045f, ropeY - h * 0.025f, w * 0.075f, ropeY + h * 0.025f),
+            RectF(w * 0.075f, ropeY - h * 0.018f, w * 0.11f, ropeY + h * 0.018f),
             h * 0.01f, h * 0.01f, paint
         )
         canvas.drawRoundRect(
-            RectF(w * 0.925f, ropeY - h * 0.025f, w * 0.955f, ropeY + h * 0.025f),
+            RectF(w * 0.89f, ropeY - h * 0.018f, w * 0.925f, ropeY + h * 0.018f),
             h * 0.01f, h * 0.01f, paint
         )
 
         paint.color = if (danger) 0xD8FFFFFF.toInt() else 0x35FFFFFF
         canvas.drawRoundRect(
-            RectF(w * 0.33f, h * 0.925f, w * 0.67f, h * 0.937f),
+            RectF(w * 0.22f, h * 0.875f, w * 0.78f, h * 0.889f),
             h * 0.006f, h * 0.006f, paint
         )
 
@@ -579,7 +579,7 @@ class SplitGameView(context: Context) : View(context) {
             paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
             paint.textSize = h * 0.040f
             paint.color = Color.WHITE
-            canvas.drawText("JUMP", w * 0.5f, h * 0.82f, paint)
+            canvas.drawText("JUMP", w * 0.5f, h * 0.73f, paint)
         }
     }
 
@@ -592,7 +592,7 @@ class SplitGameView(context: Context) : View(context) {
 
         val leftX = (0.5f - targetHalf) * w
         val rightX = (0.5f + targetHalf) * w
-        val y = h * 0.90f
+        val y = h * 0.835f
 
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = h * 0.006f
@@ -615,8 +615,8 @@ class SplitGameView(context: Context) : View(context) {
         val pulse = 0.55f + 0.45f * sin((nowMs-stageStartedMs)/95.0).toFloat()
         val trapLeft = trapSide < 0
 
-        val left = RectF(0f, h*0.72f, w*0.50f, h)
-        val right = RectF(w*0.50f, h*0.72f, w, h)
+        val left = RectF(0f, h*0.66f, w*0.50f, h)
+        val right = RectF(w*0.50f, h*0.66f, w, h)
 
         paint.style = Paint.Style.FILL
         paint.color = if (trapLeft) ((120 + pulse*70).toInt() shl 24) or 0x00FF3158 else 0x5032FF9A
@@ -628,19 +628,19 @@ class SplitGameView(context: Context) : View(context) {
         paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
         paint.textSize = h * 0.030f
         paint.color = Color.WHITE
-        canvas.drawText(if (trapLeft) "TRAP" else "SAFE", w*0.25f, h*0.87f, paint)
-        canvas.drawText(if (!trapLeft) "TRAP" else "SAFE", w*0.75f, h*0.87f, paint)
+        canvas.drawText(if (trapLeft) "TRAP" else "SAFE", w*0.25f, h*0.83f, paint)
+        canvas.drawText(if (!trapLeft) "TRAP" else "SAFE", w*0.75f, h*0.83f, paint)
 
         paint.textSize = h * 0.075f
-        canvas.drawText(if (trapLeft) "→" else "←", w*0.5f, h*0.80f, paint)
+        canvas.drawText(if (trapLeft) "→" else "←", w*0.5f, h*0.72f, paint)
     }
 
     private fun drawCenterTarget(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
         val cx = w * 0.5f
-        val cy = h * 0.88f
-        val rect = RectF(cx-w*0.075f, cy-h*0.030f, cx+w*0.075f, cy+h*0.030f)
+        val cy = h * 0.835f
+        val rect = RectF(cx-w*0.14f, cy-h*0.022f, cx+w*0.14f, cy+h*0.022f)
 
         paint.style = Paint.Style.FILL
         paint.color = 0x24FFFFFF
@@ -726,14 +726,14 @@ class SplitGameView(context: Context) : View(context) {
             paint.style = Paint.Style.FILL
             paint.color = Color.WHITE
             paint.textSize = h * if (stage == Stage.GAME_OVER) 0.070f else 0.054f
-            canvas.drawText(primary, w*0.5f, h*0.28f, paint)
+            canvas.drawText(primary, w*0.5f, h*0.20f, paint)
         }
 
         if (!transient && secondary.isNotBlank()) {
             paint.typeface = android.graphics.Typeface.DEFAULT
             paint.textSize = h * 0.019f
             paint.color = 0xC8FFFFFF.toInt()
-            canvas.drawText(secondary, w*0.5f, h*0.325f, paint)
+            canvas.drawText(secondary, w*0.5f, h*0.245f, paint)
         }
 
         if (stage == Stage.CALIBRATE) {
@@ -791,7 +791,7 @@ class SplitGameView(context: Context) : View(context) {
         val center = bodyCenterX(pose)
         paint.style = Paint.Style.FILL
         paint.color = 0xD8FFFFFF.toInt()
-        canvas.drawCircle(center*w, h*0.91f, h*0.008f, paint)
+        canvas.drawCircle(center*w, h*0.84f, h*0.008f, paint)
 
         paint.textAlign = Paint.Align.RIGHT
         paint.typeface = android.graphics.Typeface.DEFAULT
