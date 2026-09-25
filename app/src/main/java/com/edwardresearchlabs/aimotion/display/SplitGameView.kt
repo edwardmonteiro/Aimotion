@@ -48,13 +48,15 @@ class SplitGameView(context: Context) : View(context) {
         ToneGenerator(AudioManager.STREAM_MUSIC, 45)
     }.getOrNull()
 
-    private val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= 31) {
-        val manager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
-        manager.defaultVibrator
-    } else {
-        @Suppress("DEPRECATION")
-        context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-    }
+    private val vibrator: Vibrator? = runCatching {
+        if (Build.VERSION.SDK_INT >= 31) {
+            val manager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+            manager?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }
+    }.getOrNull()
 
     private var stage = Stage.CALIBRATE
     private var calibration: Calibration? = null
