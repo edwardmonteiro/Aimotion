@@ -7,11 +7,11 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.edwardresearchlabs.aimotion"
+        applicationId = "com.edwardresearchlabs.split"
         minSdk = 29
         targetSdk = 37
-        versionCode = 10
-        versionName = "0.6.1"
+        versionCode = 5
+        versionName = "0.3.0"
     }
 
     compileOptions {
