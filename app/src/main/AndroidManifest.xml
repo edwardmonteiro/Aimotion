@@ -5,11 +5,11 @@
 
     <application
         android:allowBackup="true"
-        android:label="AI Motion"
-        android:theme="@style/Theme.AIMotion">
+        android:label="SPLIT"
+        android:theme="@style/Theme.AIMotion">\n
         <activity
-            android:name=".MainActivity"
-            android:screenOrientation="landscape"
+            android:name="com.edwardresearchlabs.aimotion.SplitActivity"
+            android:screenOrientation="portrait"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
