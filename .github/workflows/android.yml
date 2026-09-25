@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, stickfight-clean-v1 ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
