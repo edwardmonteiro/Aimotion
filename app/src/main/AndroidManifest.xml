@@ -9,7 +9,7 @@
         android:theme="@style/Theme.AIMotion">\n
         <activity
             android:name="com.edwardresearchlabs.aimotion.SplitActivity"
-            android:screenOrientation="landscape"
+            android:screenOrientation="portrait"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
