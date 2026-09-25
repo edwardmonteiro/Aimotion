@@ -26,11 +26,14 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sin
 import kotlin.random.Random
 
 class SplitGameView(context: Context) : View(context) {
 
-    private enum class Stage { CALIBRATE, ROPE, SPLIT, MOVE, RECOVER, GAME_OVER }
+    private enum class Stage {
+        CALIBRATE, COUNTDOWN, ROPE, SPLIT, ESCAPE, RECOVER, GAME_OVER
+    }
 
     private data class Calibration(
         val hipY: Float,
@@ -45,7 +48,7 @@ class SplitGameView(context: Context) : View(context) {
     private val random = Random(24)
 
     private val tone = runCatching {
-        ToneGenerator(AudioManager.STREAM_MUSIC, 45)
+        ToneGenerator(AudioManager.STREAM_MUSIC, 42)
     }.getOrNull()
 
     private val vibrator: Vibrator? = runCatching {
@@ -68,28 +71,30 @@ class SplitGameView(context: Context) : View(context) {
     private var calAnkleSpread = 0f
     private var calHipWidth = 0f
 
-    private var lastFrameNs = System.nanoTime()
     private var stageStartedMs = SystemClock.elapsedRealtime()
+    private var lastFrameNs = System.nanoTime()
 
-    private var ropePhase = 0.18f
-    private var ropeCrossings = 0
-    private var ropeSpeed = 0.92f
+    private var ropePhase = 0.08f
+    private var ropeSpeed = 0.52f
+    private var jumpSeenThisCycle = false
+    private var goodJumps = 0
 
-    private var trapSide = -1
     private var splitAirSeen = false
+    private var trapSide = -1
+    private var escapeStartCenter = 0.5f
 
     private var score = 0
     private var combo = 0
     private var lives = 3
     private var bestSplit = 0
+    private var round = 1
 
-    private var feedbackText = ""
+    private var feedback = ""
     private var feedbackUntilMs = 0L
-    private var flashMissUntilMs = 0L
-
+    private var flashUntilMs = 0L
+    private var cameraError: String? = null
     private var visionFps = 0f
     private var visionLatencyMs = 0L
-    private var cameraError: String? = null
 
     init {
         setLayerType(LAYER_TYPE_SOFTWARE, null)
@@ -108,11 +113,10 @@ class SplitGameView(context: Context) : View(context) {
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.action != MotionEvent.ACTION_UP) return true
-        if (stage == Stage.GAME_OVER) {
-            resetAll()
-        } else {
+        if (stage == Stage.GAME_OVER) resetAll()
+        else {
             resetCalibration()
-            showFeedback("RECALIBRATING", 800L)
+            showFeedback("RECALIBRATING", 700L)
         }
         return true
     }
@@ -125,22 +129,21 @@ class SplitGameView(context: Context) : View(context) {
         lastFrameNs = nowNs
 
         val nowMs = SystemClock.elapsedRealtime()
-        val pose = MotionRuntime.freshPose(420L)
+        val pose = MotionRuntime.freshPose(450L)
 
         if (stage == Stage.CALIBRATE) collectCalibration(pose)
         else updateGame(dt, nowMs, pose)
 
-        drawCameraPolish(canvas)
-        drawFloor(canvas, nowMs)
-        if (stage == Stage.ROPE) drawRope(canvas)
-        drawPlayerGuides(canvas, pose)
+        drawCameraShade(canvas)
+        drawCourt(canvas)
+        drawGameObjects(canvas, nowMs)
         drawHud(canvas)
-        drawStagePrompt(canvas, nowMs)
-        drawVisionStatus(canvas, pose)
+        drawPrompt(canvas, nowMs)
+        drawTracking(canvas, pose)
 
-        if (nowMs < flashMissUntilMs) {
+        if (nowMs < flashUntilMs) {
             paint.style = Paint.Style.FILL
-            paint.color = 0x22FF3B5C
+            paint.color = 0x30FF294D
             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
         }
 
@@ -149,7 +152,7 @@ class SplitGameView(context: Context) : View(context) {
 
     private fun collectCalibration(pose: BodyPose?) {
         if (pose == null) return
-        val sample = calibrationSample(pose) ?: return
+        val sample = sampleCalibration(pose) ?: return
 
         calHipY += sample.hipY
         calAnkleY += sample.ankleY
@@ -160,20 +163,19 @@ class SplitGameView(context: Context) : View(context) {
 
         if (calCount >= CALIBRATION_FRAMES) {
             calibration = Calibration(
-                calHipY / calCount,
-                calAnkleY / calCount,
-                calTorso / calCount,
-                calAnkleSpread / calCount,
-                calHipWidth / calCount
+                hipY = calHipY / calCount,
+                ankleY = calAnkleY / calCount,
+                torsoHeight = calTorso / calCount,
+                ankleSpread = calAnkleSpread / calCount,
+                hipWidth = calHipWidth / calCount
             )
-            stage = Stage.ROPE
+            stage = Stage.COUNTDOWN
             stageStartedMs = SystemClock.elapsedRealtime()
-            showFeedback("READY", 700L)
             successHaptic()
         }
     }
 
-    private fun calibrationSample(pose: BodyPose): Calibration? {
+    private fun sampleCalibration(pose: BodyPose): Calibration? {
         val ls = pose[Joint.LEFT_SHOULDER] ?: return null
         val rs = pose[Joint.RIGHT_SHOULDER] ?: return null
         val lh = pose[Joint.LEFT_HIP] ?: return null
@@ -181,8 +183,7 @@ class SplitGameView(context: Context) : View(context) {
         val la = pose[Joint.LEFT_ANKLE] ?: return null
         val ra = pose[Joint.RIGHT_ANKLE] ?: return null
 
-        val required = listOf(ls, rs, lh, rh, la, ra)
-        if (required.any { it.confidence < 0.62f }) return null
+        if (listOf(ls, rs, lh, rh, la, ra).any { it.confidence < 0.58f }) return null
 
         val shoulderY = (ls.y + rs.y) * 0.5f
         val hipY = (lh.y + rh.y) * 0.5f
@@ -191,35 +192,65 @@ class SplitGameView(context: Context) : View(context) {
         val ankleSpread = abs(la.x - ra.x)
         val hipWidth = abs(lh.x - rh.x)
 
-        if (torso < 0.07f || ankleSpread < 0.015f || hipWidth < 0.025f) return null
+        if (torso < 0.065f || hipWidth < 0.025f) return null
 
-        return Calibration(hipY, ankleY, torso, ankleSpread, hipWidth)
+        return Calibration(
+            hipY = hipY,
+            ankleY = ankleY,
+            torsoHeight = torso,
+            ankleSpread = max(ankleSpread, 0.025f),
+            hipWidth = hipWidth
+        )
     }
 
     private fun updateGame(dt: Float, nowMs: Long, pose: BodyPose?) {
         val base = calibration ?: return
 
         when (stage) {
-            Stage.ROPE -> {
-                val previous = ropePhase
-                ropePhase += dt * ropeSpeed
-                if (ropePhase >= 1f) ropePhase -= 1f
+            Stage.COUNTDOWN -> {
+                if (nowMs - stageStartedMs >= 2500L) {
+                    stage = Stage.ROPE
+                    stageStartedMs = nowMs
+                    ropePhase = 0.08f
+                    jumpSeenThisCycle = false
+                }
+            }
 
-                val crossedFloor = previous > 0.82f && ropePhase < 0.18f
-                if (crossedFloor) {
-                    if (pose != null && isAirborne(pose, base)) {
-                        score += 10 + min(combo, 10)
+            Stage.ROPE -> {
+                val old = ropePhase
+                ropePhase += dt * ropeSpeed
+
+                val jumpWindow = ropePhase >= 0.58f || ropePhase <= 0.06f
+                if (jumpWindow && pose != null && isAirborne(pose, base)) {
+                    jumpSeenThisCycle = true
+                }
+
+                if (ropePhase >= 1f) {
+                    ropePhase -= 1f
+
+                    if (jumpSeenThisCycle) {
+                        goodJumps++
                         combo++
-                        ropeCrossings++
+                        score += 12 + min(combo, 8)
+                        showFeedback("GOOD", 300L)
                         successTick()
                     } else {
-                        miss("JUMP")
+                        softMiss("JUMP")
                     }
 
-                    if (ropeCrossings >= 4 && stage != Stage.GAME_OVER) {
-                        ropeCrossings = 0
-                        beginSplit(nowMs)
+                    jumpSeenThisCycle = false
+
+                    if (goodJumps >= JUMPS_BEFORE_SPLIT && stage != Stage.GAME_OVER) {
+                        goodJumps = 0
+                        stage = Stage.SPLIT
+                        stageStartedMs = nowMs
+                        splitAirSeen = false
+                        warningHaptic()
                     }
+                }
+
+                if (old < 0.58f && ropePhase >= 0.58f) {
+                    runCatching { tone?.startTone(ToneGenerator.TONE_PROP_PROMPT, 35) }
                 }
             }
 
@@ -228,44 +259,51 @@ class SplitGameView(context: Context) : View(context) {
                     val airborne = isAirborne(pose, base)
                     if (airborne) splitAirSeen = true
 
-                    if (!airborne && isWideReady(pose, base)) {
-                        val splitScore = calculateSplitScore(pose, base, nowMs)
-                        bestSplit = max(bestSplit, splitScore)
-                        score += 20 + splitScore / 5
+                    val elapsed = nowMs - stageStartedMs
+                    if (!airborne && elapsed > 180L && isSplitLanding(pose, base)) {
+                        val value = splitScore(pose, base, elapsed)
+                        bestSplit = max(bestSplit, value)
+                        score += 25 + value / 4
                         combo++
-                        showFeedback("SPLIT  $splitScore", 620L)
+                        showFeedback("SPLIT  $value", 520L)
                         successHaptic()
-                        stage = Stage.MOVE
+
+                        trapSide = if (random.nextBoolean()) -1 else 1
+                        escapeStartCenter = bodyCenterX(pose)
+                        stage = Stage.ESCAPE
                         stageStartedMs = nowMs
                     }
                 }
 
-                if (nowMs - stageStartedMs > 1250L) {
-                    miss("SPLIT")
+                if (nowMs - stageStartedMs > 1800L) {
+                    hardMiss("SPLIT")
                     if (stage != Stage.GAME_OVER) {
-                        stage = Stage.MOVE
+                        trapSide = if (random.nextBoolean()) -1 else 1
+                        escapeStartCenter = pose?.let { bodyCenterX(it) } ?: 0.5f
+                        stage = Stage.ESCAPE
                         stageStartedMs = nowMs
                     }
                 }
             }
 
-            Stage.MOVE -> {
+            Stage.ESCAPE -> {
                 if (pose != null) {
                     val center = bodyCenterX(pose)
-                    val safeReached = if (trapSide < 0) center > 0.61f else center < 0.39f
+                    val delta = center - escapeStartCenter
+                    val movedEnough = if (trapSide < 0) delta > 0.115f else delta < -0.115f
 
-                    if (safeReached) {
-                        score += 35 + min(combo * 2, 30)
+                    if (movedEnough) {
+                        score += 40 + min(combo * 2, 28)
                         combo++
-                        showFeedback(if (trapSide < 0) "RIGHT  ✓" else "LEFT  ✓", 500L)
+                        showFeedback("SAFE", 420L)
                         successHaptic()
                         stage = Stage.RECOVER
                         stageStartedMs = nowMs
                     }
                 }
 
-                if (nowMs - stageStartedMs > 1450L) {
-                    miss(if (trapSide < 0) "MOVE RIGHT" else "MOVE LEFT")
+                if (nowMs - stageStartedMs > 2100L) {
+                    hardMiss(if (trapSide < 0) "GO RIGHT" else "GO LEFT")
                     if (stage != Stage.GAME_OVER) {
                         stage = Stage.RECOVER
                         stageStartedMs = nowMs
@@ -276,35 +314,31 @@ class SplitGameView(context: Context) : View(context) {
             Stage.RECOVER -> {
                 if (pose != null) {
                     val center = bodyCenterX(pose)
-                    if (abs(center - 0.5f) < 0.095f) {
-                        score += 15
+                    if (abs(center - 0.5f) < 0.085f) {
+                        score += 18
                         combo++
-                        showFeedback("RECOVER  ✓", 450L)
+                        showFeedback("CENTER", 350L)
+                        round++
+                        ropeSpeed = (ropeSpeed + 0.025f).coerceAtMost(0.72f)
+
                         stage = Stage.ROPE
                         stageStartedMs = nowMs
-                        ropeSpeed = (ropeSpeed + 0.018f).coerceAtMost(1.18f)
+                        ropePhase = 0.08f
+                        jumpSeenThisCycle = false
                     }
                 }
 
-                if (nowMs - stageStartedMs > 1600L) {
+                if (nowMs - stageStartedMs > 2400L) {
                     combo = 0
-                    showFeedback("CENTER", 450L)
                     stage = Stage.ROPE
                     stageStartedMs = nowMs
+                    ropePhase = 0.08f
+                    jumpSeenThisCycle = false
                 }
             }
 
             Stage.GAME_OVER, Stage.CALIBRATE -> Unit
         }
-    }
-
-    private fun beginSplit(nowMs: Long) {
-        trapSide = if (random.nextBoolean()) -1 else 1
-        splitAirSeen = false
-        stage = Stage.SPLIT
-        stageStartedMs = nowMs
-        showFeedback("SPLIT", 520L)
-        warningHaptic()
     }
 
     private fun isAirborne(pose: BodyPose, base: Calibration): Boolean {
@@ -313,83 +347,89 @@ class SplitGameView(context: Context) : View(context) {
         val la = pose[Joint.LEFT_ANKLE] ?: return false
         val ra = pose[Joint.RIGHT_ANKLE] ?: return false
 
-        if (listOf(lh, rh, la, ra).any { it.confidence < 0.48f }) return false
+        if (listOf(lh, rh, la, ra).any { it.confidence < 0.45f }) return false
 
         val hipY = (lh.y + rh.y) * 0.5f
         val ankleY = (la.y + ra.y) * 0.5f
         val hipLift = base.hipY - hipY
         val ankleLift = base.ankleY - ankleY
 
-        return hipLift > base.torsoHeight * 0.065f ||
-            ankleLift > base.torsoHeight * 0.10f
+        return hipLift > base.torsoHeight * 0.040f ||
+            ankleLift > base.torsoHeight * 0.065f
     }
 
-    private fun isWideReady(pose: BodyPose, base: Calibration): Boolean {
+    private fun isSplitLanding(pose: BodyPose, base: Calibration): Boolean {
         val la = pose[Joint.LEFT_ANKLE] ?: return false
         val ra = pose[Joint.RIGHT_ANKLE] ?: return false
         val lh = pose[Joint.LEFT_HIP] ?: return false
         val rh = pose[Joint.RIGHT_HIP] ?: return false
 
-        if (listOf(la, ra, lh, rh).any { it.confidence < 0.52f }) return false
+        if (listOf(la, ra, lh, rh).any { it.confidence < 0.50f }) return false
 
         val ankleSpread = abs(la.x - ra.x)
-        val hipWidth = abs(lh.x - rh.x)
-        val wideEnough = ankleSpread > max(base.ankleSpread * 1.16f, hipWidth * 1.22f)
+        val hipWidth = max(abs(lh.x - rh.x), 0.025f)
+        val target = max(base.ankleSpread * 1.10f, hipWidth * 1.12f)
 
-        return wideEnough &&
-            (splitAirSeen || SystemClock.elapsedRealtime() - stageStartedMs > 360L)
+        return ankleSpread >= target &&
+            (splitAirSeen || SystemClock.elapsedRealtime() - stageStartedMs > 420L)
     }
 
-    private fun calculateSplitScore(pose: BodyPose, base: Calibration, nowMs: Long): Int {
-        val la = pose[Joint.LEFT_ANKLE] ?: return 60
-        val ra = pose[Joint.RIGHT_ANKLE] ?: return 60
-        val lh = pose[Joint.LEFT_HIP] ?: return 60
-        val rh = pose[Joint.RIGHT_HIP] ?: return 60
-        val lk = pose[Joint.LEFT_KNEE] ?: return 60
-        val rk = pose[Joint.RIGHT_KNEE] ?: return 60
+    private fun splitScore(pose: BodyPose, base: Calibration, elapsed: Long): Int {
+        val la = pose[Joint.LEFT_ANKLE] ?: return 65
+        val ra = pose[Joint.RIGHT_ANKLE] ?: return 65
+        val lh = pose[Joint.LEFT_HIP] ?: return 65
+        val rh = pose[Joint.RIGHT_HIP] ?: return 65
+        val lk = pose[Joint.LEFT_KNEE] ?: return 65
+        val rk = pose[Joint.RIGHT_KNEE] ?: return 65
 
-        val spread = abs(la.x - ra.x)
-        val hipWidth = max(0.02f, abs(lh.x - rh.x))
-        val widthRatio = spread / hipWidth
+        val ankleSpread = abs(la.x - ra.x)
+        val hipWidth = max(abs(lh.x - rh.x), 0.025f)
+        val widthRatio = ankleSpread / hipWidth
 
         val hipY = (lh.y + rh.y) * 0.5f
         val kneeY = (lk.y + rk.y) * 0.5f
-        val legCompression = abs(kneeY - hipY) / max(base.torsoHeight, 0.05f)
+        val compression = abs(kneeY - hipY) / max(base.torsoHeight, 0.05f)
 
-        val widthScore = (((widthRatio - 1.0f) / 0.8f) * 35f).coerceIn(12f, 35f)
-        val compressionScore = ((1.9f - legCompression) / 0.8f * 25f).coerceIn(8f, 25f)
-
-        val elapsed = nowMs - stageStartedMs
-        val timingScore = when {
-            elapsed <= 620L -> 40f
-            elapsed <= 850L -> 33f
-            elapsed <= 1050L -> 25f
-            else -> 18f
+        val width = ((widthRatio - 1.05f) / 0.70f * 35f).coerceIn(15f, 35f)
+        val low = ((1.95f - compression) / 0.90f * 25f).coerceIn(10f, 25f)
+        val timing = when {
+            elapsed <= 650L -> 40f
+            elapsed <= 950L -> 34f
+            elapsed <= 1300L -> 27f
+            else -> 20f
         }
 
-        return (widthScore + compressionScore + timingScore).toInt().coerceIn(55, 100)
+        return (width + low + timing).toInt().coerceIn(60, 100)
     }
 
     private fun bodyCenterX(pose: BodyPose): Float {
-        val points = listOfNotNull(
+        val pts = listOfNotNull(
             pose[Joint.LEFT_HIP],
             pose[Joint.RIGHT_HIP],
             pose[Joint.LEFT_SHOULDER],
             pose[Joint.RIGHT_SHOULDER]
-        ).filter { it.confidence >= 0.48f }
+        ).filter { it.confidence >= 0.45f }
 
-        if (points.isEmpty()) return 0.5f
-        val raw = points.map { it.x }.average().toFloat()
+        if (pts.isEmpty()) return 0.5f
+        val raw = pts.map { it.x }.average().toFloat()
         return MotionRuntime.mapX(raw)
     }
 
-    private fun miss(label: String) {
+    private fun softMiss(label: String) {
+        combo = 0
+        showFeedback(label, 420L)
+        flashUntilMs = SystemClock.elapsedRealtime() + 120L
+        runCatching { tone?.startTone(ToneGenerator.TONE_PROP_NACK, 45) }
+        vibrate(20L)
+    }
+
+    private fun hardMiss(label: String) {
         combo = 0
         lives--
-        flashMissUntilMs = SystemClock.elapsedRealtime() + 180L
-        showFeedback(label, 650L)
-        runCatching { tone?.startTone(ToneGenerator.TONE_PROP_NACK, 90) }
-        vibrate(48L)
+        showFeedback(label, 550L)
+        flashUntilMs = SystemClock.elapsedRealtime() + 180L
+        runCatching { tone?.startTone(ToneGenerator.TONE_PROP_NACK, 75) }
+        vibrate(42L)
 
         if (lives <= 0) {
             stage = Stage.GAME_OVER
@@ -398,18 +438,18 @@ class SplitGameView(context: Context) : View(context) {
     }
 
     private fun successTick() {
-        runCatching { tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 28) }
-        vibrate(10L)
+        runCatching { tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 24) }
+        vibrate(8L)
     }
 
     private fun successHaptic() {
-        runCatching { tone?.startTone(ToneGenerator.TONE_PROP_ACK, 60) }
-        vibrate(28L)
+        runCatching { tone?.startTone(ToneGenerator.TONE_PROP_ACK, 55) }
+        vibrate(24L)
     }
 
     private fun warningHaptic() {
-        runCatching { tone?.startTone(ToneGenerator.TONE_PROP_PROMPT, 50) }
-        vibrate(22L)
+        runCatching { tone?.startTone(ToneGenerator.TONE_PROP_PROMPT, 70) }
+        vibrate(18L)
     }
 
     private fun vibrate(ms: Long) {
@@ -417,7 +457,9 @@ class SplitGameView(context: Context) : View(context) {
             val device = vibrator ?: return@runCatching
             if (!device.hasVibrator()) return@runCatching
             if (Build.VERSION.SDK_INT >= 26) {
-                device.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
+                device.vibrate(
+                    VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE)
+                )
             } else {
                 @Suppress("DEPRECATION")
                 device.vibrate(ms)
@@ -426,283 +468,304 @@ class SplitGameView(context: Context) : View(context) {
     }
 
     private fun showFeedback(text: String, durationMs: Long) {
-        feedbackText = text
+        feedback = text
         feedbackUntilMs = SystemClock.elapsedRealtime() + durationMs
     }
 
-    private fun drawCameraPolish(canvas: Canvas) {
+    private fun drawCameraShade(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
-
         paint.style = Paint.Style.FILL
         paint.shader = LinearGradient(
             0f, 0f, 0f, h,
-            intArrayOf(0x8A000000.toInt(), 0x18000000, 0x42000000),
-            floatArrayOf(0f, 0.52f, 1f),
+            intArrayOf(0x5A000000, 0x08000000, 0x50000000),
+            floatArrayOf(0f, 0.55f, 1f),
             Shader.TileMode.CLAMP
         )
         canvas.drawRect(0f, 0f, w, h, paint)
         paint.shader = null
-
-        paint.color = 0x24000000
-        canvas.drawRect(0f, 0f, w * 0.06f, h, paint)
-        canvas.drawRect(w * 0.94f, 0f, w, h, paint)
     }
 
-    private fun drawFloor(canvas: Canvas, nowMs: Long) {
+    private fun drawCourt(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
-        val horizon = h * 0.71f
-        val bottom = h * 0.97f
+        val horizon = h * 0.72f
+        val bottom = h * 0.98f
 
         paint.style = Paint.Style.FILL
-        paint.color = 0x28000000
+        paint.color = 0x24000000
         path.reset()
-        path.moveTo(w * 0.17f, horizon)
-        path.lineTo(w * 0.83f, horizon)
+        path.moveTo(w * 0.18f, horizon)
+        path.lineTo(w * 0.82f, horizon)
         path.lineTo(w * 0.98f, bottom)
         path.lineTo(w * 0.02f, bottom)
         path.close()
         canvas.drawPath(path, paint)
 
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = max(1f, h * 0.0022f)
-        paint.color = 0x45FFFFFF
-        canvas.drawLine(w * 0.50f, horizon, w * 0.50f, bottom, paint)
+        paint.strokeWidth = h * 0.0024f
+        paint.color = 0x50FFFFFF
+        canvas.drawLine(w * 0.5f, horizon, w * 0.5f, bottom, paint)
 
         for (i in 1..3) {
             val t = i / 3f
             val y = horizon + (bottom - horizon) * t * t
-            canvas.drawLine(w * (0.17f - 0.15f * t), y, w * (0.83f + 0.15f * t), y, paint)
-        }
-
-        if (stage == Stage.SPLIT || stage == Stage.MOVE) {
-            val pulse = 0.55f + 0.45f * cos((nowMs - stageStartedMs) / 90.0).toFloat()
-            drawTrap(canvas, trapSide, pulse)
-        }
-
-        if (stage == Stage.RECOVER) {
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = h * 0.006f
-            paint.color = 0xCCFFFFFF.toInt()
-            val cx = w * 0.5f
-            val cy = h * 0.86f
-            canvas.drawOval(
-                RectF(cx - w * 0.065f, cy - h * 0.025f, cx + w * 0.065f, cy + h * 0.025f),
+            canvas.drawLine(
+                w * (0.18f - 0.16f * t),
+                y,
+                w * (0.82f + 0.16f * t),
+                y,
                 paint
             )
         }
     }
 
-    private fun drawTrap(canvas: Canvas, side: Int, pulse: Float) {
-        val w = width.toFloat()
-        val h = height.toFloat()
-        val horizon = h * 0.72f
-        val bottom = h * 0.98f
-
-        val leftHalf = side < 0
-        val x0Top = if (leftHalf) w * 0.18f else w * 0.50f
-        val x1Top = if (leftHalf) w * 0.50f else w * 0.82f
-        val x0Bottom = if (leftHalf) w * 0.02f else w * 0.50f
-        val x1Bottom = if (leftHalf) w * 0.50f else w * 0.98f
-
-        paint.style = Paint.Style.FILL
-        val alpha = (110 + pulse * 75).toInt().coerceIn(0, 255)
-        paint.color = (alpha shl 24) or 0x00FF3158
-
-        path.reset()
-        path.moveTo(x0Top, horizon)
-        path.lineTo(x1Top, horizon)
-        path.lineTo(x1Bottom, bottom)
-        path.lineTo(x0Bottom, bottom)
-        path.close()
-        canvas.drawPath(path, paint)
-
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = h * 0.005f
-        paint.color = 0xE6FF6784.toInt()
-        canvas.drawPath(path, paint)
-
-        paint.style = Paint.Style.FILL
-        paint.color = 0xD6FFFFFF.toInt()
-        paint.textAlign = Paint.Align.CENTER
-        paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
-        paint.textSize = h * 0.028f
-        val tx = if (leftHalf) w * 0.28f else w * 0.72f
-        canvas.drawText("TRAP", tx, h * 0.865f, paint)
-        paint.typeface = android.graphics.Typeface.DEFAULT
-        paint.textAlign = Paint.Align.LEFT
+    private fun drawGameObjects(canvas: Canvas, nowMs: Long) {
+        when (stage) {
+            Stage.ROPE -> drawRope(canvas)
+            Stage.SPLIT -> drawSplitTarget(canvas)
+            Stage.ESCAPE -> drawEscapeZones(canvas, nowMs)
+            Stage.RECOVER -> drawCenterTarget(canvas)
+            else -> Unit
+        }
     }
 
     private fun drawRope(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
 
-        val theta = ropePhase * (2.0 * PI)
-        val vertical = ((1.0 - cos(theta)) * 0.5).toFloat()
+        val angle = ropePhase * (2.0 * PI)
+        val swing = ((1.0 - cos(angle)) * 0.5).toFloat()
+        val topY = h * 0.15f
         val floorY = h * 0.89f
-        val ropeY = floorY - vertical * h * 0.71f
-        val floorProximity = 1f - vertical
+        val ropeY = topY + swing * (floorY - topY)
+        val danger = ropePhase >= 0.58f || ropePhase <= 0.06f
 
         paint.style = Paint.Style.STROKE
         paint.strokeCap = Paint.Cap.ROUND
-        paint.strokeWidth = h * 0.008f
-        paint.color = if (floorProximity > 0.72f) 0xF2F8FAFC.toInt()
-        else 0x90D7F7FF.toInt()
-
-        paint.maskFilter = BlurMaskFilter(h * 0.006f, BlurMaskFilter.Blur.NORMAL)
+        paint.strokeWidth = h * if (danger) 0.011f else 0.007f
+        paint.color = if (danger) Color.WHITE else 0xA8E6F9FF.toInt()
+        paint.maskFilter = BlurMaskFilter(h * 0.005f, BlurMaskFilter.Blur.NORMAL)
 
         path.reset()
         path.moveTo(w * 0.08f, ropeY)
         path.cubicTo(
-            w * 0.30f, ropeY + h * 0.035f,
-            w * 0.70f, ropeY + h * 0.035f,
+            w * 0.30f, ropeY + h * 0.04f,
+            w * 0.70f, ropeY + h * 0.04f,
             w * 0.92f, ropeY
         )
         canvas.drawPath(path, paint)
-
         paint.maskFilter = null
-        paint.strokeCap = Paint.Cap.BUTT
+
+        paint.style = Paint.Style.FILL
+        paint.color = 0xE8FFFFFF.toInt()
+        canvas.drawRoundRect(
+            RectF(w * 0.045f, ropeY - h * 0.025f, w * 0.075f, ropeY + h * 0.025f),
+            h * 0.01f, h * 0.01f, paint
+        )
+        canvas.drawRoundRect(
+            RectF(w * 0.925f, ropeY - h * 0.025f, w * 0.955f, ropeY + h * 0.025f),
+            h * 0.01f, h * 0.01f, paint
+        )
+
+        paint.color = if (danger) 0xD8FFFFFF.toInt() else 0x35FFFFFF
+        canvas.drawRoundRect(
+            RectF(w * 0.33f, h * 0.925f, w * 0.67f, h * 0.937f),
+            h * 0.006f, h * 0.006f, paint
+        )
+
+        if (danger) {
+            paint.textAlign = Paint.Align.CENTER
+            paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
+            paint.textSize = h * 0.040f
+            paint.color = Color.WHITE
+            canvas.drawText("JUMP", w * 0.5f, h * 0.82f, paint)
+        }
     }
 
-    private fun drawPlayerGuides(canvas: Canvas, pose: BodyPose?) {
-        if (pose == null || calibration == null) return
-
+    private fun drawSplitTarget(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
-        val center = bodyCenterX(pose)
+        val base = calibration ?: return
+        val targetHalf = max(base.ankleSpread * 0.70f, base.hipWidth * 0.78f)
+            .coerceIn(0.055f, 0.12f)
+
+        val leftX = (0.5f - targetHalf) * w
+        val rightX = (0.5f + targetHalf) * w
+        val y = h * 0.90f
 
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = h * 0.003f
-        paint.color = 0x70FFFFFF
-        canvas.drawCircle(center * w, h * 0.91f, h * 0.018f, paint)
+        paint.strokeWidth = h * 0.006f
+        paint.color = 0xF2FFFFFF.toInt()
 
-        if (stage == Stage.SPLIT) {
-            val base = calibration ?: return
-            val requiredHalf = max(base.ankleSpread * 0.62f, base.hipWidth * 0.72f)
-            val left = (center - requiredHalf).coerceIn(0.04f, 0.96f) * w
-            val right = (center + requiredHalf).coerceIn(0.04f, 0.96f) * w
+        val l = RectF(leftX-w*0.030f, y-h*0.018f, leftX+w*0.030f, y+h*0.018f)
+        val r = RectF(rightX-w*0.030f, y-h*0.018f, rightX+w*0.030f, y+h*0.018f)
+        canvas.drawOval(l, paint)
+        canvas.drawOval(r, paint)
 
-            paint.color = 0xAFFFFFFF.toInt()
-            paint.strokeWidth = h * 0.004f
-            canvas.drawLine(left, h * 0.925f, left, h * 0.955f, paint)
-            canvas.drawLine(right, h * 0.925f, right, h * 0.955f, paint)
-        }
+        paint.style = Paint.Style.FILL
+        paint.color = 0x26FFFFFF
+        canvas.drawOval(l, paint)
+        canvas.drawOval(r, paint)
+    }
+
+    private fun drawEscapeZones(canvas: Canvas, nowMs: Long) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val pulse = 0.55f + 0.45f * sin((nowMs-stageStartedMs)/95.0).toFloat()
+        val trapLeft = trapSide < 0
+
+        val left = RectF(0f, h*0.72f, w*0.50f, h)
+        val right = RectF(w*0.50f, h*0.72f, w, h)
+
+        paint.style = Paint.Style.FILL
+        paint.color = if (trapLeft) ((120 + pulse*70).toInt() shl 24) or 0x00FF3158 else 0x5032FF9A
+        canvas.drawRect(left, paint)
+        paint.color = if (!trapLeft) ((120 + pulse*70).toInt() shl 24) or 0x00FF3158 else 0x5032FF9A
+        canvas.drawRect(right, paint)
+
+        paint.textAlign = Paint.Align.CENTER
+        paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        paint.textSize = h * 0.030f
+        paint.color = Color.WHITE
+        canvas.drawText(if (trapLeft) "TRAP" else "SAFE", w*0.25f, h*0.87f, paint)
+        canvas.drawText(if (!trapLeft) "TRAP" else "SAFE", w*0.75f, h*0.87f, paint)
+
+        paint.textSize = h * 0.075f
+        canvas.drawText(if (trapLeft) "→" else "←", w*0.5f, h*0.80f, paint)
+    }
+
+    private fun drawCenterTarget(canvas: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val cx = w * 0.5f
+        val cy = h * 0.88f
+        val rect = RectF(cx-w*0.075f, cy-h*0.030f, cx+w*0.075f, cy+h*0.030f)
+
+        paint.style = Paint.Style.FILL
+        paint.color = 0x24FFFFFF
+        canvas.drawOval(rect, paint)
+
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = h * 0.006f
+        paint.color = 0xE8FFFFFF.toInt()
+        canvas.drawOval(rect, paint)
     }
 
     private fun drawHud(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
 
+        paint.style = Paint.Style.FILL
         paint.textAlign = Paint.Align.LEFT
         paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
-        paint.style = Paint.Style.FILL
+        paint.textSize = h * 0.040f
         paint.color = Color.WHITE
-        paint.textSize = h * 0.046f
-        canvas.drawText("SPLIT", w * 0.045f, h * 0.085f, paint)
+        canvas.drawText("SPLIT", w*0.045f, h*0.075f, paint)
 
         paint.typeface = android.graphics.Typeface.DEFAULT
-        paint.textSize = h * 0.020f
-        paint.color = 0xB8FFFFFF.toInt()
-        canvas.drawText("JUMP  ·  REACT  ·  RECOVER", w * 0.045f, h * 0.122f, paint)
+        paint.textSize = h * 0.018f
+        paint.color = 0xAFFFFFFF.toInt()
+        canvas.drawText("ROUND $round", w*0.045f, h*0.108f, paint)
 
         paint.textAlign = Paint.Align.RIGHT
         paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
-        paint.textSize = h * 0.045f
+        paint.textSize = h * 0.038f
         paint.color = Color.WHITE
-        canvas.drawText(score.toString(), w * 0.95f, h * 0.085f, paint)
+        canvas.drawText(score.toString(), w*0.95f, h*0.075f, paint)
 
         paint.typeface = android.graphics.Typeface.DEFAULT
-        paint.textSize = h * 0.021f
-        paint.color = 0xB8FFFFFF.toInt()
-        canvas.drawText("COMBO  $combo", w * 0.95f, h * 0.122f, paint)
+        paint.textSize = h * 0.018f
+        paint.color = 0xAFFFFFFF.toInt()
+        canvas.drawText("COMBO $combo", w*0.95f, h*0.108f, paint)
 
         paint.textAlign = Paint.Align.LEFT
         for (i in 0 until 3) {
-            paint.color = if (i < lives) 0xFFFFFFFF.toInt() else 0x44FFFFFF
-            canvas.drawCircle(
-                w * 0.047f + i * h * 0.030f,
-                h * 0.155f,
-                h * 0.0075f,
-                paint
-            )
+            paint.color = if (i < lives) Color.WHITE else 0x38FFFFFF
+            canvas.drawCircle(w*0.047f + i*h*0.030f, h*0.145f, h*0.007f, paint)
         }
 
         if (bestSplit > 0) {
             paint.textAlign = Paint.Align.RIGHT
-            paint.textSize = h * 0.018f
+            paint.textSize = h * 0.016f
             paint.color = 0xAFFFFFFF.toInt()
-            canvas.drawText("BEST SPLIT  $bestSplit", w * 0.95f, h * 0.154f, paint)
+            canvas.drawText("BEST SPLIT $bestSplit", w*0.95f, h*0.143f, paint)
         }
-
-        paint.textAlign = Paint.Align.LEFT
-        paint.typeface = android.graphics.Typeface.DEFAULT
     }
 
-    private fun drawStagePrompt(canvas: Canvas, nowMs: Long) {
+    private fun drawPrompt(canvas: Canvas, nowMs: Long) {
         val w = width.toFloat()
         val h = height.toFloat()
+        val transient = nowMs < feedbackUntilMs && feedback.isNotBlank()
 
-        val primary: String
-        val secondary: String
-
-        when (stage) {
-            Stage.CALIBRATE -> { primary = "STEP BACK"; secondary = "FULL BODY IN FRAME" }
-            Stage.ROPE -> { primary = ""; secondary = "" }
-            Stage.SPLIT -> { primary = "SPLIT"; secondary = "LOW  ·  WIDE  ·  READY" }
-            Stage.MOVE -> {
-                primary = if (trapSide < 0) "MOVE RIGHT" else "MOVE LEFT"
-                secondary = "PUSH  ·  DON'T CROSS FEET"
-            }
-            Stage.RECOVER -> { primary = "RECOVER"; secondary = "BACK TO CENTER" }
-            Stage.GAME_OVER -> { primary = "GAME OVER"; secondary = "TAP TO RUN AGAIN" }
+        val primary = when {
+            transient -> feedback
+            stage == Stage.CALIBRATE -> "STEP BACK"
+            stage == Stage.COUNTDOWN -> countdownText(nowMs)
+            stage == Stage.ROPE -> "FOLLOW THE ROPE"
+            stage == Stage.SPLIT -> "SPLIT NOW"
+            stage == Stage.ESCAPE -> if (trapSide < 0) "MOVE RIGHT" else "MOVE LEFT"
+            stage == Stage.RECOVER -> "CENTER"
+            stage == Stage.GAME_OVER -> "GAME OVER"
+            else -> ""
         }
 
-        val transient = nowMs < feedbackUntilMs && feedbackText.isNotBlank()
-        val headline = if (transient) feedbackText else primary
+        val secondary = when (stage) {
+            Stage.CALIBRATE -> "FULL BODY · FEET VISIBLE"
+            Stage.COUNTDOWN -> "JUMP WHEN THE ROPE REACHES YOUR FEET"
+            Stage.ROPE -> "${goodJumps + 1} / $JUMPS_BEFORE_SPLIT"
+            Stage.SPLIT -> "SMALL HOP · LAND WIDE · STAY LOW"
+            Stage.ESCAPE -> "PUSH OFF · DO NOT CROSS YOUR FEET"
+            Stage.RECOVER -> "RETURN TO THE WHITE OVAL"
+            Stage.GAME_OVER -> "TAP TO PLAY AGAIN"
+        }
 
-        if (headline.isNotBlank()) {
+        if (primary.isNotBlank()) {
             paint.textAlign = Paint.Align.CENTER
             paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
             paint.style = Paint.Style.FILL
             paint.color = Color.WHITE
-            paint.textSize = h * if (stage == Stage.GAME_OVER) 0.076f else 0.065f
-            canvas.drawText(headline, w * 0.5f, h * 0.31f, paint)
+            paint.textSize = h * if (stage == Stage.GAME_OVER) 0.070f else 0.054f
+            canvas.drawText(primary, w*0.5f, h*0.28f, paint)
         }
 
         if (!transient && secondary.isNotBlank()) {
-            paint.textAlign = Paint.Align.CENTER
             paint.typeface = android.graphics.Typeface.DEFAULT
-            paint.textSize = h * 0.020f
+            paint.textSize = h * 0.019f
             paint.color = 0xC8FFFFFF.toInt()
-            canvas.drawText(secondary, w * 0.5f, h * 0.355f, paint)
+            canvas.drawText(secondary, w*0.5f, h*0.325f, paint)
         }
 
         if (stage == Stage.CALIBRATE) {
             val progress = (calCount / CALIBRATION_FRAMES.toFloat()).coerceIn(0f, 1f)
-            val barW = w * 0.18f
-            val x0 = w * 0.5f - barW * 0.5f
-            val y = h * 0.395f
+            val barW = w * 0.20f
+            val y = h * 0.37f
 
             paint.style = Paint.Style.FILL
-            paint.color = 0x35FFFFFF
+            paint.color = 0x30FFFFFF
             canvas.drawRoundRect(
-                RectF(x0, y, x0 + barW, y + h * 0.006f),
-                h * 0.003f, h * 0.003f, paint
+                RectF(w*0.5f-barW*0.5f, y, w*0.5f+barW*0.5f, y+h*0.007f),
+                h*0.004f, h*0.004f, paint
             )
-
-            paint.color = 0xFFFFFFFF.toInt()
+            paint.color = Color.WHITE
             canvas.drawRoundRect(
-                RectF(x0, y, x0 + barW * progress, y + h * 0.006f),
-                h * 0.003f, h * 0.003f, paint
+                RectF(w*0.5f-barW*0.5f, y, w*0.5f-barW*0.5f+barW*progress, y+h*0.007f),
+                h*0.004f, h*0.004f, paint
             )
         }
-
-        paint.textAlign = Paint.Align.LEFT
-        paint.typeface = android.graphics.Typeface.DEFAULT
     }
 
-    private fun drawVisionStatus(canvas: Canvas, pose: BodyPose?) {
+    private fun countdownText(nowMs: Long): String {
+        val elapsed = nowMs - stageStartedMs
+        return when {
+            elapsed < 800L -> "3"
+            elapsed < 1600L -> "2"
+            elapsed < 2400L -> "1"
+            else -> "GO"
+        }
+    }
+
+    private fun drawTracking(canvas: Canvas, pose: BodyPose?) {
         val w = width.toFloat()
         val h = height.toFloat()
 
@@ -710,34 +773,36 @@ class SplitGameView(context: Context) : View(context) {
         if (error != null) {
             paint.textAlign = Paint.Align.CENTER
             paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
-            paint.textSize = h * 0.028f
+            paint.textSize = h * 0.025f
             paint.color = 0xFFFF6B82.toInt()
-            canvas.drawText(error, w * 0.5f, h * 0.60f, paint)
-            paint.textAlign = Paint.Align.LEFT
+            canvas.drawText(error, w*0.5f, h*0.62f, paint)
             return
         }
 
         if (pose == null) {
             paint.textAlign = Paint.Align.CENTER
             paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
-            paint.textSize = h * 0.026f
+            paint.textSize = h * 0.024f
             paint.color = 0xD8FFFFFF.toInt()
-            canvas.drawText("FINDING BODY…", w * 0.5f, h * 0.62f, paint)
-            paint.textAlign = Paint.Align.LEFT
+            canvas.drawText("FINDING BODY…", w*0.5f, h*0.62f, paint)
             return
         }
 
+        val center = bodyCenterX(pose)
+        paint.style = Paint.Style.FILL
+        paint.color = 0xD8FFFFFF.toInt()
+        canvas.drawCircle(center*w, h*0.91f, h*0.008f, paint)
+
         paint.textAlign = Paint.Align.RIGHT
         paint.typeface = android.graphics.Typeface.DEFAULT
-        paint.textSize = h * 0.0145f
-        paint.color = 0x72FFFFFF
+        paint.textSize = h * 0.013f
+        paint.color = 0x60FFFFFF
         canvas.drawText(
-            "${"%.0f".format(visionFps)} FPS  ·  ${visionLatencyMs} ms",
-            w * 0.95f,
-            h * 0.965f,
+            "${"%.0f".format(visionFps)} FPS · $visionLatencyMs ms",
+            w*0.96f,
+            h*0.965f,
             paint
         )
-        paint.textAlign = Paint.Align.LEFT
     }
 
     private fun resetAll() {
@@ -745,9 +810,11 @@ class SplitGameView(context: Context) : View(context) {
         combo = 0
         lives = 3
         bestSplit = 0
-        ropeSpeed = 0.92f
-        ropePhase = 0.18f
-        ropeCrossings = 0
+        round = 1
+        ropeSpeed = 0.52f
+        ropePhase = 0.08f
+        goodJumps = 0
+        jumpSeenThisCycle = false
         resetCalibration()
     }
 
@@ -765,6 +832,7 @@ class SplitGameView(context: Context) : View(context) {
     }
 
     companion object {
-        private const val CALIBRATION_FRAMES = 32
+        private const val CALIBRATION_FRAMES = 28
+        private const val JUMPS_BEFORE_SPLIT = 3
     }
 }
