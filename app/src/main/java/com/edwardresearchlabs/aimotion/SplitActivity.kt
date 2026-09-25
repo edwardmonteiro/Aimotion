@@ -8,7 +8,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsController
-import android.widget.FrameLayout\nimport android.widget.TextView\nimport android.view.Gravity
+import android.widget.FrameLayout
+import android.widget.TextView
+import android.view.Gravity
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
