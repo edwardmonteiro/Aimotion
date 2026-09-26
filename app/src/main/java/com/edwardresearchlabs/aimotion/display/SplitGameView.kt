@@ -95,6 +95,7 @@ class SplitGameView(context: Context) : View(context) {
     private var cameraError: String? = null
     private var visionFps = 0f
     private var visionLatencyMs = 0L
+    private var arenaReady = false
 
     init {
         setLayerType(LAYER_TYPE_SOFTWARE, null)
@@ -105,6 +106,7 @@ class SplitGameView(context: Context) : View(context) {
     fun setVisionFps(value: Float) { visionFps = value }
     fun setVisionLatency(value: Long) { visionLatencyMs = value }
     fun setCameraError(value: String?) { cameraError = value; invalidate() }
+    fun setArenaReady(value: Boolean) { arenaReady = value; invalidate() }
 
     override fun onDetachedFromWindow() {
         runCatching { tone?.release() }
@@ -135,7 +137,7 @@ class SplitGameView(context: Context) : View(context) {
         else updateGame(dt, nowMs, pose)
 
         drawCameraShade(canvas)
-        drawCourt(canvas)
+        if (!arenaReady) drawCourt(canvas)
         drawGameObjects(canvas, nowMs)
         drawHud(canvas)
         drawPrompt(canvas, nowMs)
@@ -533,53 +535,30 @@ class SplitGameView(context: Context) : View(context) {
     private fun drawRope(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
-
-        val angle = ropePhase * (2.0 * PI)
-        val swing = ((1.0 - cos(angle)) * 0.5).toFloat()
-        val topY = h * 0.34f
-        val floorY = h * 0.84f
-        val ropeY = topY + swing * (floorY - topY)
         val danger = ropePhase >= 0.58f || ropePhase <= 0.06f
+        val pulse = if (danger) 1f else 0.55f
 
+        // The rope is now only a rhythm cue. It no longer crosses the player's body.
         paint.style = Paint.Style.STROKE
         paint.strokeCap = Paint.Cap.ROUND
-        paint.strokeWidth = h * if (danger) 0.011f else 0.007f
-        paint.color = if (danger) Color.WHITE else 0xA8E6F9FF.toInt()
-        paint.maskFilter = BlurMaskFilter(h * 0.005f, BlurMaskFilter.Blur.NORMAL)
-
-        path.reset()
-        path.moveTo(w * 0.12f, ropeY)
-        path.cubicTo(
-            w * 0.30f, ropeY + h * 0.022f,
-            w * 0.70f, ropeY + h * 0.022f,
-            w * 0.88f, ropeY
+        paint.strokeWidth = h * 0.004f
+        paint.color = if (danger) Color.WHITE else 0x70FFFFFF
+        val cy = h * 0.86f
+        canvas.drawArc(
+            RectF(w * 0.34f, cy - h * 0.020f, w * 0.66f, cy + h * 0.020f),
+            195f, 150f, false, paint
         )
-        canvas.drawPath(path, paint)
-        paint.maskFilter = null
 
         paint.style = Paint.Style.FILL
-        paint.color = 0xE8FFFFFF.toInt()
-        canvas.drawRoundRect(
-            RectF(w * 0.075f, ropeY - h * 0.018f, w * 0.11f, ropeY + h * 0.018f),
-            h * 0.01f, h * 0.01f, paint
-        )
-        canvas.drawRoundRect(
-            RectF(w * 0.89f, ropeY - h * 0.018f, w * 0.925f, ropeY + h * 0.018f),
-            h * 0.01f, h * 0.01f, paint
-        )
-
-        paint.color = if (danger) 0xD8FFFFFF.toInt() else 0x35FFFFFF
-        canvas.drawRoundRect(
-            RectF(w * 0.22f, h * 0.875f, w * 0.78f, h * 0.889f),
-            h * 0.006f, h * 0.006f, paint
-        )
+        paint.color = if (danger) 0xD8FFFFFF.toInt() else 0x55FFFFFF
+        canvas.drawCircle(w * 0.5f, cy, h * (0.009f + 0.004f * pulse), paint)
 
         if (danger) {
             paint.textAlign = Paint.Align.CENTER
             paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
-            paint.textSize = h * 0.040f
+            paint.textSize = h * 0.028f
             paint.color = Color.WHITE
-            canvas.drawText("JUMP", w * 0.5f, h * 0.73f, paint)
+            canvas.drawText("HOP", w * 0.5f, h * 0.79f, paint)
         }
     }
 
@@ -702,7 +681,7 @@ class SplitGameView(context: Context) : View(context) {
             transient -> feedback
             stage == Stage.CALIBRATE -> "STEP BACK"
             stage == Stage.COUNTDOWN -> countdownText(nowMs)
-            stage == Stage.ROPE -> "FOLLOW THE ROPE"
+            stage == Stage.ROPE -> "BOUNCE"
             stage == Stage.SPLIT -> "SPLIT NOW"
             stage == Stage.ESCAPE -> if (trapSide < 0) "MOVE RIGHT" else "MOVE LEFT"
             stage == Stage.RECOVER -> "CENTER"
@@ -712,11 +691,11 @@ class SplitGameView(context: Context) : View(context) {
 
         val secondary = when (stage) {
             Stage.CALIBRATE -> "FULL BODY · FEET VISIBLE"
-            Stage.COUNTDOWN -> "JUMP WHEN THE ROPE REACHES YOUR FEET"
-            Stage.ROPE -> "${goodJumps + 1} / $JUMPS_BEFORE_SPLIT"
+            Stage.COUNTDOWN -> "GET LIGHT ON YOUR FEET"
+            Stage.ROPE -> "ONE RHYTHM HOP · THEN SPLIT"
             Stage.SPLIT -> "SMALL HOP · LAND WIDE · STAY LOW"
             Stage.ESCAPE -> "PUSH OFF · DO NOT CROSS YOUR FEET"
-            Stage.RECOVER -> "RETURN TO THE WHITE OVAL"
+            Stage.RECOVER -> "RECOVER FAST · READY AGAIN"
             Stage.GAME_OVER -> "TAP TO PLAY AGAIN"
         }
 
@@ -833,6 +812,6 @@ class SplitGameView(context: Context) : View(context) {
 
     companion object {
         private const val CALIBRATION_FRAMES = 28
-        private const val JUMPS_BEFORE_SPLIT = 3
+        private const val JUMPS_BEFORE_SPLIT = 1
     }
 }
