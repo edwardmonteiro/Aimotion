@@ -56,7 +56,7 @@ class TrainingArenaView(
 
         viewer.renderer.clearOptions = viewer.renderer.clearOptions.apply {
             clear = true
-            clearColor = doubleArrayOf(0.0, 0.0, 0.0, 0.0)
+            clearColor = floatArrayOf(0f, 0f, 0f, 0f)
         }
 
         val bytes = context.assets.open(MODEL_PATH).use { input ->
@@ -126,7 +126,7 @@ class TrainingArenaView(
         stopFrames()
 
         runCatching {
-            modelViewer?.destroy()
+            modelViewer?.destroyModel()
         }
 
         modelViewer = null
