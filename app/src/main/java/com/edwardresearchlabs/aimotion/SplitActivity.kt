@@ -18,6 +18,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.edwardresearchlabs.aimotion.display.SplitGameView
+import com.edwardresearchlabs.aimotion.display.TrainingArenaView
 import com.edwardresearchlabs.aimotion.motion.MotionEngine
 import com.edwardresearchlabs.aimotion.motion.MotionRuntime
 import com.edwardresearchlabs.aimotion.motion.PoseSmoother
@@ -27,6 +28,7 @@ import java.util.concurrent.Executors
 class SplitActivity : ComponentActivity() {
 
     private lateinit var previewView: PreviewView
+    private lateinit var arenaView: TrainingArenaView
     private lateinit var gameView: SplitGameView
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
@@ -60,8 +62,25 @@ class SplitActivity : ComponentActivity() {
 
         gameView = SplitGameView(this)
 
+        arenaView = TrainingArenaView(this) { ready ->
+            runOnUiThread {
+                arenaView.visibility = if (ready) View.VISIBLE else View.INVISIBLE
+                gameView.setArenaReady(ready)
+            }
+        }.apply {
+            visibility = View.INVISIBLE
+        }
+
         root.addView(
             previewView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        root.addView(
+            arenaView,
             FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -229,6 +248,7 @@ class SplitActivity : ComponentActivity() {
         bindGeneration++
         cameraProvider?.unbindAll()
         analyzer?.requestClose()
+        if (::arenaView.isInitialized) arenaView.release()
         cameraExecutor.shutdown()
         super.onDestroy()
     }
