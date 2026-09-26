@@ -2,7 +2,7 @@ name: SPLIT Android APK
 
 on:
   push:
-    branches: [ main, split-virtual-rope ]
+    branches: [ main, split-virtual-rope, split-v04-training-arena ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
