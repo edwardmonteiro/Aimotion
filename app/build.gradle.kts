@@ -27,5 +27,6 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.6.2")
     implementation("androidx.camera:camera-view:1.6.2")
     implementation("com.google.mlkit:pose-detection:18.0.0-beta5")
-    implementation("com.google.mlkit:segmentation-selfie:16.0.0-beta6")\n    implementation("com.google.android.filament:filament-utils-android:1.76.1")
+    implementation("com.google.mlkit:segmentation-selfie:16.0.0-beta6")
+    implementation("com.google.android.filament:filament-utils-android:1.76.1")
 }
