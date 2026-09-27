@@ -5,10 +5,13 @@
 
     <application
         android:allowBackup="true"
-        android:label="SPLIT"
-        android:theme="@style/Theme.AIMotion">\n
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/Theme.AIMotion">
         <activity
             android:name="com.edwardresearchlabs.aimotion.SplitActivity"
+            android:label="@string/app_name"
             android:screenOrientation="portrait"
             android:exported="true">
             <intent-filter>
