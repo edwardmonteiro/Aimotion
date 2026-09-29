@@ -1,7 +1,6 @@
 package com.edwardresearchlabs.aimotion.display
 
 import android.content.Context
-import android.graphics.Color
 import android.view.Choreographer
 import android.view.TextureView
 import com.google.android.filament.View as FilamentView
@@ -35,7 +34,6 @@ class TrainingArenaView(
 
     init {
         isOpaque = false
-        setBackgroundColor(Color.TRANSPARENT)
         isClickable = false
         isFocusable = false
 
